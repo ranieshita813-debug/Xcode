@@ -1,0 +1,14 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+*.iml
+.idea/
+.vscode/
+.DS_Store
+# Generated platform folders are created by `flutter create .`; remove these lines to commit them
