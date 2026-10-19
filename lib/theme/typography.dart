@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// UI text uses IBM Plex Sans, code uses JetBrains Mono (both from the design).
+/// UI text and code typography throughout Lattice.
+/// Uses IBM Plex Mono font everywhere by default.
 class LatticeText {
   LatticeText._();
 
@@ -12,7 +13,7 @@ class LatticeText {
     double? height,
     double? letterSpacing,
   }) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.ibmPlexMono(
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -25,11 +26,23 @@ class LatticeText {
     FontWeight weight = FontWeight.w400,
     required Color color,
     double? height,
-  }) =>
-      GoogleFonts.jetBrainsMono(
+    String fontFamily = 'IBM Plex Mono',
+  }) {
+    try {
+      return GoogleFonts.getFont(
+        fontFamily,
         fontSize: size,
         fontWeight: weight,
         color: color,
         height: height,
       );
+    } catch (_) {
+      return GoogleFonts.ibmPlexMono(
+        fontSize: size,
+        fontWeight: weight,
+        color: color,
+        height: height,
+      );
+    }
+  }
 }

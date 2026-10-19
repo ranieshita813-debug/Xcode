@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../models/editor_model.dart';
 import '../state/settings.dart';
 import '../theme/tokens.dart';
@@ -24,8 +25,12 @@ class _EditorScreenState extends State<EditorScreen> {
     'editor.tsx': EditorModel.editorTsx(),
     'fs.ts': EditorModel.fsTs(),
     'App.tsx': EditorModel.appTsx(),
+    'main.dart': EditorModel.mainDart(),
+    'app.py': EditorModel.appPy(),
+    'native.cpp': EditorModel.nativeCpp(),
+    'Helper.kt': EditorModel.helperKt(),
   };
-  final _openTabs = <String>['editor.tsx', 'fs.ts', 'App.tsx'];
+  final _openTabs = <String>['editor.tsx', 'main.dart', 'app.py'];
   String _active = 'editor.tsx';
 
   bool _drawer = false;
@@ -39,10 +44,6 @@ class _EditorScreenState extends State<EditorScreen> {
   // ---- input routing -----------------------------------------------------
 
   void _onKey(String k) {
-    if (_paletteQuery != null) {
-      _paletteKey(k);
-      return;
-    }
     switch (k) {
       case Keys.backspace:
         _model.backspace();
@@ -57,31 +58,6 @@ class _EditorScreenState extends State<EditorScreen> {
       default:
         _model.insert(k);
     }
-  }
-
-  void _paletteKey(String k) {
-    final q = _paletteQuery!;
-    setState(() {
-      switch (k) {
-        case Keys.backspace:
-          if (q.isNotEmpty) _paletteQuery = q.substring(0, q.length - 1);
-        case Keys.enter:
-          final r = filterCommands(q);
-          if (r.isNotEmpty) _runCommand(r[_paletteSel.clamp(0, r.length - 1)]);
-        case Keys.left:
-          _paletteSel = (_paletteSel - 1).clamp(0, 99);
-        case Keys.right:
-          _paletteSel = _paletteSel + 1;
-        case Keys.tab:
-          break;
-        default:
-          _paletteQuery = q + k;
-      }
-      if (_paletteQuery != null) {
-        final n = filterCommands(_paletteQuery!).length;
-        _paletteSel = n == 0 ? 0 : _paletteSel.clamp(0, n - 1);
-      }
-    });
   }
 
   void _runCommand(PaletteCommand cmd) {
@@ -106,7 +82,7 @@ class _EditorScreenState extends State<EditorScreen> {
   // ---- actions -----------------------------------------------------------
 
   void _run() {
-    final src = _models['editor.tsx']!.text;
+    final src = _model.text;
     final lines = src.split('\n');
     final errors = <String>[];
     for (var i = 0; i < lines.length; i++) {
@@ -179,10 +155,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   result: _build,
                   onClose: () => setState(() => _terminal = false),
                 )
-              else ...[
+              else
                 ExtraKeys(onKey: _onKey),
-                LatticeKeyboard(onKey: _onKey),
-              ],
             ],
           ),
           // Scrim + palette
@@ -201,6 +175,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 query: _paletteQuery!,
                 selected: _paletteSel,
                 onPick: _runCommand,
+                onQueryChanged: (q) => setState(() => _paletteQuery = q),
               ),
             ),
           ],
@@ -265,7 +240,11 @@ class _AppBar extends StatelessWidget {
         padding: const EdgeInsets.only(left: 8, right: 12),
         child: Row(
           children: [
-            LIconButton(icon: Icons.menu, iconSize: 22, onTap: onMenu),
+            LIconButton(
+              icon: iconoir.Menu(color: c.text, width: 22, height: 22),
+              iconSize: 22,
+              onTap: onMenu,
+            ),
             const SizedBox(width: 4),
             Expanded(
               child: InkWell(
@@ -289,11 +268,20 @@ class _AppBar extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            LIconButton(icon: Icons.undo, onTap: onUndo),
+            LIconButton(
+              icon: iconoir.Undo(color: c.text, width: 18, height: 18),
+              onTap: onUndo,
+            ),
             const SizedBox(width: 4),
-            LIconButton(icon: Icons.redo, onTap: onRedo),
+            LIconButton(
+              icon: iconoir.Redo(color: c.text, width: 18, height: 18),
+              onTap: onRedo,
+            ),
             const SizedBox(width: 4),
-            LIconButton(icon: Icons.play_arrow_outlined, onTap: onRun),
+            LIconButton(
+              icon: iconoir.Play(color: c.text, width: 18, height: 18),
+              onTap: onRun,
+            ),
           ],
         ),
       ),
@@ -379,7 +367,9 @@ class _Tabs extends StatelessWidget {
             ),
           SizedBox(
             width: 44,
-            child: Icon(Icons.add, size: 18, color: c.textMuted),
+            child: Center(
+              child: iconoir.Plus(color: c.textMuted, width: 18, height: 18),
+            ),
           ),
         ],
       ),
@@ -395,7 +385,7 @@ class _Breadcrumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final style = LatticeText.ui(12, color: c.textMuted);
-    final chev = Icon(Icons.chevron_right, size: 12, color: c.textFaint);
+    final chev = iconoir.NavArrowRight(color: c.textFaint, width: 12, height: 12);
     return SizedBox(
       height: 28,
       child: Padding(

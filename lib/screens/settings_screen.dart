@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../state/settings.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
@@ -6,6 +7,58 @@ import '../widgets/common.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  void _showFontPicker(BuildContext context, AppSettings s) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final c = ctx.c;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Select Coding Font',
+                  style: LatticeText.ui(16,
+                      weight: FontWeight.w600, color: c.text),
+                ),
+              ),
+              Divider(color: c.border),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final font in AppSettings.availableFonts)
+                      ListTile(
+                        title: Text(
+                          font,
+                          style: LatticeText.mono(15,
+                              color: c.text, fontFamily: font),
+                        ),
+                        trailing: s.fontFamily == font
+                            ? iconoir.Check(
+                                color: c.accent, width: 20, height: 20)
+                            : null,
+                        onTap: () {
+                          s.update((x) => x.fontFamily = font);
+                          Navigator.of(ctx).pop();
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,8 +76,8 @@ class SettingsScreen extends StatelessWidget {
                 child: Row(
                   children: [
                     LIconButton(
-                      icon: Icons.chevron_left,
-                      iconSize: 24,
+                      icon: iconoir.NavArrowLeft(
+                          color: c.text, width: 24, height: 24),
                       onTap: () => Navigator.of(context).maybePop(),
                     ),
                     const SizedBox(width: 4),
@@ -45,16 +98,19 @@ class SettingsScreen extends StatelessWidget {
                     child: _ThemeSegments(settings: s),
                   ),
                   const SizedBox(height: 6),
-                  _Row(
-                    title: 'Font',
-                    trailing: Row(
-                      children: [
-                        Text(s.fontFamily,
-                            style: LatticeText.ui(14, color: c.textMuted)),
-                        const SizedBox(width: 12),
-                        Icon(Icons.chevron_right,
-                            size: 16, color: c.textFaint),
-                      ],
+                  InkWell(
+                    onTap: () => _showFontPicker(context, s),
+                    child: _Row(
+                      title: 'Font',
+                      trailing: Row(
+                        children: [
+                          Text(s.fontFamily,
+                              style: LatticeText.ui(14, color: c.textMuted)),
+                          const SizedBox(width: 12),
+                          iconoir.NavArrowRight(
+                              color: c.textFaint, width: 16, height: 16),
+                        ],
+                      ),
                     ),
                   ),
                   _FontSize(settings: s),
@@ -231,7 +287,8 @@ class _FontSize extends StatelessWidget {
                       weight: FontWeight.w500, color: c.text)),
               const Spacer(),
               Text('${settings.fontSize.round()} pt',
-                  style: LatticeText.mono(13, color: c.textMuted)),
+                  style: LatticeText.mono(13,
+                      color: c.textMuted, fontFamily: settings.fontFamily)),
             ],
           ),
           SliderTheme(
@@ -264,7 +321,9 @@ class _FontSize extends StatelessWidget {
             child: Text(
               r'const greet = (name: string) => `Hello, ${name}`;',
               style: LatticeText.mono(settings.fontSize,
-                  color: c.synPlain, height: 1.8),
+                  color: c.synPlain,
+                  height: 1.8,
+                  fontFamily: settings.fontFamily),
             ),
           ),
         ],

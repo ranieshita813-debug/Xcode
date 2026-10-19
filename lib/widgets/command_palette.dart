@@ -1,22 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
 import 'common.dart';
 
 class PaletteCommand {
-  const PaletteCommand(this.id, this.title, this.icon, this.category);
+  const PaletteCommand(this.id, this.title, this.iconBuilder, this.category);
   final String id;
   final String title;
-  final IconData icon;
+  final Widget Function(Color color, double size) iconBuilder;
   final String category;
 }
 
-const kCommands = <PaletteCommand>[
-  PaletteCommand('format.doc', 'Format Document', Icons.format_align_left, 'Editor'),
-  PaletteCommand('format.sel', 'Format Selection', Icons.format_align_left, 'Editor'),
-  PaletteCommand('goto.line', 'Go to Line…', Icons.tag, 'Navigate'),
-  PaletteCommand('wrap', 'Toggle Word Wrap', Icons.wrap_text, 'View'),
-  PaletteCommand('run', 'Run Current File', Icons.play_arrow_outlined, 'Run'),
+final kCommands = <PaletteCommand>[
+  PaletteCommand(
+      'format.doc',
+      'Format Document',
+      (color, size) => iconoir.AlignLeft(color: color, width: size, height: size),
+      'Editor'),
+  PaletteCommand(
+      'format.sel',
+      'Format Selection',
+      (color, size) => iconoir.AlignLeft(color: color, width: size, height: size),
+      'Editor'),
+  PaletteCommand(
+      'goto.line',
+      'Go to Line…',
+      (color, size) => iconoir.Hashtag(color: color, width: size, height: size),
+      'Navigate'),
+  PaletteCommand(
+      'wrap',
+      'Toggle Word Wrap',
+      (color, size) => iconoir.WrapText(color: color, width: size, height: size),
+      'View'),
+  PaletteCommand(
+      'run',
+      'Run Current File',
+      (color, size) => iconoir.Play(color: color, width: size, height: size),
+      'Run'),
 ];
 
 const kTotalCommands = 38;
@@ -27,24 +48,57 @@ List<PaletteCommand> filterCommands(String q) {
   return kCommands.where((c) => c.title.toLowerCase().contains(query)).toList();
 }
 
-/// Floating card from the "03 Command palette" frame. Text input arrives from
-/// the in-app keyboard, so this widget is purely presentational.
-class CommandPalette extends StatelessWidget {
+/// Floating card from the "03 Command palette" frame.
+class CommandPalette extends StatefulWidget {
   const CommandPalette({
     super.key,
     required this.query,
     required this.selected,
     required this.onPick,
+    this.onQueryChanged,
   });
 
   final String query;
   final int selected;
   final ValueChanged<PaletteCommand> onPick;
+  final ValueChanged<String>? onQueryChanged;
+
+  @override
+  State<CommandPalette> createState() => _CommandPaletteState();
+}
+
+class _CommandPaletteState extends State<CommandPalette> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.query);
+  }
+
+  @override
+  void didUpdateWidget(CommandPalette oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.query != _controller.text) {
+      _controller.value = TextEditingController.fromValue(
+        TextEditingValue(
+          text: widget.query,
+          selection: TextSelection.collapsed(offset: widget.query.length),
+        ),
+      ).value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final results = filterCommands(query);
+    final results = filterCommands(widget.query);
     return Container(
       decoration: BoxDecoration(
         color: c.raised,
@@ -69,11 +123,28 @@ class CommandPalette extends StatelessWidget {
                       style: LatticeText.mono(16,
                           weight: FontWeight.w500, color: c.accent)),
                   const SizedBox(width: 8),
-                  Text(query,
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: true,
                       style: LatticeText.ui(15,
-                          weight: FontWeight.w500, color: c.text)),
-                  const SizedBox(width: 2),
-                  BlinkingCaret(color: c.accent, height: 20),
+                          weight: FontWeight.w500, color: c.text),
+                      cursorColor: c.accent,
+                      decoration: const InputDecoration(
+                        isCollapsed: true,
+                        border: InputBorder.none,
+                      ),
+                      onChanged: (val) {
+                        widget.onQueryChanged?.call(val);
+                      },
+                      onSubmitted: (_) {
+                        if (results.isNotEmpty) {
+                          widget.onPick(results[widget.selected
+                              .clamp(0, results.length - 1)]);
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -93,20 +164,20 @@ class CommandPalette extends StatelessWidget {
                   ),
                 for (var i = 0; i < results.length; i++)
                   Material(
-                    color: i == selected ? c.accentSoft : Colors.transparent,
+                    color: i == widget.selected ? c.accentSoft : Colors.transparent,
                     borderRadius: BorderRadius.circular(10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(10),
-                      onTap: () => onPick(results[i]),
+                      onTap: () => widget.onPick(results[i]),
                       child: SizedBox(
                         height: 46,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           child: Row(
                             children: [
-                              Icon(results[i].icon,
-                                  size: 18,
-                                  color: i == selected ? c.accent : c.textMuted),
+                              results[i].iconBuilder(
+                                  i == widget.selected ? c.accent : c.textMuted,
+                                  18),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(results[i].title,

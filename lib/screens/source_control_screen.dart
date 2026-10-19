@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
 import '../widgets/common.dart';
@@ -60,7 +61,7 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                 child: Row(
                   children: [
                     LIconButton(
-                        icon: Icons.menu,
+                        icon: iconoir.Menu(color: c.text, width: 22, height: 22),
                         iconSize: 22,
                         onTap: () => Navigator.of(context).maybePop()),
                     const SizedBox(width: 4),
@@ -79,7 +80,8 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.call_split, size: 14, color: c.accent),
+                          iconoir.GitBranch(
+                              color: c.accent, width: 14, height: 14),
                           const SizedBox(width: 6),
                           Text('main',
                               style: LatticeText.ui(13,
@@ -91,7 +93,11 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    LIconButton(icon: Icons.sync, onTap: () {}),
+                    LIconButton(
+                      icon: iconoir.Refresh(
+                          color: c.text, width: 18, height: 18),
+                      onTap: () {},
+                    ),
                   ],
                 ),
               ),
@@ -189,11 +195,12 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.check,
-                            size: 18,
+                        iconoir.Check(
                             color: _stagedCount == 0
                                 ? c.textMuted
-                                : c.onAccent),
+                                : c.onAccent,
+                            width: 18,
+                            height: 18),
                         const SizedBox(width: 8),
                         Text(
                           'Commit $_stagedCount staged file${_stagedCount == 1 ? '' : 's'}',
@@ -270,7 +277,10 @@ class _ChangeRow extends StatelessWidget {
                       color: change.staged ? c.accent : c.border, width: 1.5),
                 ),
                 child: change.staged
-                    ? Icon(Icons.check, size: 14, color: c.onAccent)
+                    ? Center(
+                        child: iconoir.Check(
+                            color: c.onAccent, width: 14, height: 14),
+                      )
                     : null,
               ),
             ),
