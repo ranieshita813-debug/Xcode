@@ -1,42 +1,164 @@
 import 'package:flutter/material.dart';
+import 'package:highlight/highlight.dart' show highlight, Node;
+import 'package:highlight/languages/cpp.dart';
+import 'package:highlight/languages/css.dart';
+import 'package:highlight/languages/dart.dart';
+import 'package:highlight/languages/go.dart';
+import 'package:highlight/languages/java.dart';
+import 'package:highlight/languages/javascript.dart';
+import 'package:highlight/languages/json.dart';
+import 'package:highlight/languages/kotlin.dart';
+import 'package:highlight/languages/python.dart';
+import 'package:highlight/languages/rust.dart';
+import 'package:highlight/languages/typescript.dart';
+import 'package:highlight/languages/xml.dart';
+import 'package:highlight/languages/yaml.dart';
+
 import '../theme/tokens.dart';
 
-final _token = RegExp(
-  r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)""" // 1 string
-  r'|(\b(?:import|from|export|function|const|let|var|async|await|return|type|default|if|else|new|true|false|null|undefined)\b)' // 2 keyword
-  r'|(\b(?:string|number|boolean|void|any|Props|Editor|App)\b)' // 3 type
-  r'|(\b[A-Za-z_$][\w$]*)(?=\()' // 4 call
-  r'|([{}()\[\];:,=.<>+\-*/])', // 5 punct
-);
+bool _initialized = false;
 
-/// Very small tokenizer that colours one line of TS/JS using design tokens.
-TextSpan highlightLine(String line, LatticeColors c, TextStyle base) {
-  final spans = <TextSpan>[];
-  var i = 0;
-  for (final m in _token.allMatches(line)) {
-    if (m.start > i) {
-      spans.add(TextSpan(
-          text: line.substring(i, m.start),
-          style: base.copyWith(color: c.synPlain)));
-    }
-    Color color = c.synPlain;
-    if (m.group(1) != null) {
-      color = c.synString;
-    } else if (m.group(2) != null) {
-      color = c.synKeyword;
-    } else if (m.group(3) != null) {
-      color = c.synType;
-    } else if (m.group(4) != null) {
-      color = c.synFunction;
-    } else if (m.group(5) != null) {
-      color = c.synPunct;
-    }
-    spans.add(TextSpan(text: m.group(0), style: base.copyWith(color: color)));
-    i = m.end;
+void _ensureInitialized() {
+  if (_initialized) return;
+  _initialized = true;
+
+  highlight.registerLanguage('javascript', javascript);
+  highlight.registerLanguage('typescript', typescript);
+  highlight.registerLanguage('dart', dart);
+  highlight.registerLanguage('kotlin', kotlin);
+  highlight.registerLanguage('cpp', cpp);
+  highlight.registerLanguage('python', python);
+  highlight.registerLanguage('json', json);
+  highlight.registerLanguage('xml', xml);
+  highlight.registerLanguage('css', css);
+  highlight.registerLanguage('java', java);
+  highlight.registerLanguage('rust', rust);
+  highlight.registerLanguage('go', go);
+  highlight.registerLanguage('yaml', yaml);
+}
+
+/// Detects syntax language from file extension.
+String detectLanguage(String? fileName) {
+  if (fileName == null || fileName.isEmpty) return 'javascript';
+  final ext = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : fileName;
+
+  switch (ext) {
+    case 'dart':
+      return 'dart';
+    case 'kt':
+    case 'kts':
+      return 'kotlin';
+    case 'cpp':
+    case 'cxx':
+    case 'cc':
+    case 'c':
+    case 'h':
+    case 'hpp':
+      return 'cpp';
+    case 'py':
+      return 'python';
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'json':
+      return 'json';
+    case 'html':
+    case 'htm':
+    case 'xml':
+      return 'xml';
+    case 'css':
+      return 'css';
+    case 'java':
+      return 'java';
+    case 'rs':
+      return 'rust';
+    case 'go':
+      return 'go';
+    case 'yaml':
+    case 'yml':
+      return 'yaml';
+    default:
+      return 'javascript';
   }
-  if (i < line.length) {
-    spans.add(TextSpan(
-        text: line.substring(i), style: base.copyWith(color: c.synPlain)));
+}
+
+Color _resolveColor(String? className, LatticeColors c) {
+  if (className == null) return c.synPlain;
+
+  if (className.contains('keyword') || className.contains('built_in')) {
+    return c.synKeyword;
   }
-  return TextSpan(children: spans, style: base);
+  if (className.contains('string') || className.contains('quote') || className.contains('subst')) {
+    return c.synString;
+  }
+  if (className.contains('type') || className.contains('class')) {
+    return c.synType;
+  }
+  if (className.contains('title') || className.contains('function')) {
+    return c.synFunction;
+  }
+  if (className.contains('comment') || className.contains('doctag')) {
+    return c.textFaint;
+  }
+  if (className.contains('number') || className.contains('symbol') || className.contains('literal')) {
+    return c.accent;
+  }
+  if (className.contains('punctuation') ||
+      className.contains('operator') ||
+      className.contains('attr') ||
+      className.contains('params')) {
+    return c.synPunct;
+  }
+
+  return c.synPlain;
+}
+
+TextSpan _convertNode(Node node, LatticeColors c, TextStyle base, {String? parentClass}) {
+  final currentClass = node.className ?? parentClass;
+  final color = _resolveColor(currentClass, c);
+  final style = base.copyWith(color: color);
+
+  if (node.value != null) {
+    return TextSpan(text: node.value, style: style);
+  }
+
+  if (node.children != null && node.children!.isNotEmpty) {
+    return TextSpan(
+      style: style,
+      children: node.children!
+          .map((child) => _convertNode(child, c, base, parentClass: currentClass))
+          .toList(),
+    );
+  }
+
+  return TextSpan(text: '', style: style);
+}
+
+/// Tokenizer that highlights code for JS, Dart, Kotlin, C++, Python, and more.
+TextSpan highlightLine(
+  String line,
+  LatticeColors c,
+  TextStyle base, {
+  String? fileName,
+  String? language,
+}) {
+  _ensureInitialized();
+  final lang = language ?? detectLanguage(fileName);
+
+  try {
+    final result = highlight.parse(line, language: lang);
+    if (result.nodes != null && result.nodes!.isNotEmpty) {
+      return TextSpan(
+        style: base,
+        children: result.nodes!
+            .map((node) => _convertNode(node, c, base))
+            .toList(),
+      );
+    }
+  } catch (_) {}
+
+  return TextSpan(text: line, style: base.copyWith(color: c.synPlain));
 }

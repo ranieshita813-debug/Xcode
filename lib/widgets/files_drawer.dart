@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
 import 'common.dart';
@@ -17,10 +18,13 @@ const _tree = <_Node>[
   _Node('src', 0, folder: true, open: true),
   _Node('components', 1, folder: true, open: true),
   _Node('editor.tsx', 2, status: 'M'),
-  _Node('Toolbar.tsx', 2),
   _Node('Tabs.tsx', 2, status: 'A'),
   _Node('fs.ts', 1, status: 'M'),
   _Node('App.tsx', 1),
+  _Node('main.dart', 1),
+  _Node('app.py', 1),
+  _Node('native.cpp', 1),
+  _Node('Helper.kt', 1),
   _Node('assets', 0, folder: true),
   _Node('package.json', 0),
   _Node('tsconfig.json', 0),
@@ -79,7 +83,8 @@ class FilesDrawer extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.call_split, size: 12, color: c.accent),
+                            iconoir.GitBranch(
+                                color: c.accent, width: 12, height: 12),
                             const SizedBox(width: 5),
                             Text('main',
                                 style: LatticeText.ui(12,
@@ -91,12 +96,14 @@ class FilesDrawer extends StatelessWidget {
                   ),
                   const Spacer(),
                   LIconButton(
-                      icon: Icons.note_add_outlined,
+                      icon: iconoir.PagePlus(
+                          color: c.text, width: 18, height: 18),
                       size: 36,
                       onTap: () {}),
                   const SizedBox(width: 10),
                   LIconButton(
-                      icon: Icons.create_new_folder_outlined,
+                      icon: iconoir.FolderPlus(
+                          color: c.text, width: 18, height: 18),
                       size: 36,
                       onTap: () {}),
                 ],
@@ -115,7 +122,8 @@ class FilesDrawer extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.search, size: 16, color: c.textMuted),
+                    iconoir.Search(
+                        color: c.textMuted, width: 16, height: 16),
                     const SizedBox(width: 8),
                     Text('Search files',
                         style: LatticeText.ui(14, color: c.textFaint)),
@@ -150,7 +158,8 @@ class FilesDrawer extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
                           children: [
-                            Icon(Icons.tune, size: 18, color: c.textMuted),
+                            iconoir.Settings(
+                                color: c.textMuted, width: 18, height: 18),
                             const SizedBox(width: 10),
                             Text('Settings',
                                 style: LatticeText.ui(14,
@@ -204,20 +213,19 @@ class _Row extends StatelessWidget {
                 SizedBox(
                   width: 16,
                   child: node.folder
-                      ? Icon(
-                          node.open ? Icons.expand_more : Icons.chevron_right,
-                          size: 16,
-                          color: c.textMuted)
+                      ? (node.open
+                          ? iconoir.NavArrowDown(
+                              color: c.textMuted, width: 16, height: 16)
+                          : iconoir.NavArrowRight(
+                              color: c.textMuted, width: 16, height: 16))
                       : null,
                 ),
                 const SizedBox(width: 8),
-                Icon(
-                  node.folder
-                      ? Icons.folder_outlined
-                      : Icons.insert_drive_file_outlined,
-                  size: 18,
-                  color: node.folder ? c.accent : c.textMuted,
-                ),
+                node.folder
+                    ? iconoir.Folder(
+                        color: c.accent, width: 18, height: 18)
+                    : iconoir.Page(
+                        color: c.textMuted, width: 18, height: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(

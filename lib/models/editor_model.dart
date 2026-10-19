@@ -12,6 +12,9 @@ const kAllSuggestions = <Suggestion>[
   Suggestion('setInterval', 'function'),
   Suggestion('saveFile', 'function'),
   Suggestion('useState', 'function'),
+  Suggestion('print', 'function'),
+  Suggestion('println', 'function'),
+  Suggestion('std::cout', 'stream'),
 ];
 
 class _Snapshot {
@@ -21,7 +24,7 @@ class _Snapshot {
   final int col;
 }
 
-/// A tiny text buffer: lines + a single cursor, with undo/redo.
+/// A text buffer: lines + a single cursor, with undo/redo.
 class EditorModel extends ChangeNotifier {
   EditorModel({
     required List<String> lines,
@@ -29,6 +32,7 @@ class EditorModel extends ChangeNotifier {
     int? col,
     this.dirty = false,
     this.gitMarks = const {},
+    this.fileName = 'editor.tsx',
   })  : lines = List<String>.of(lines),
         col = col ?? 0;
 
@@ -36,6 +40,7 @@ class EditorModel extends ChangeNotifier {
   int row;
   int col;
   bool dirty;
+  String fileName;
 
   /// line index -> 'added' | 'modified'
   final Map<int, String> gitMarks;
@@ -167,7 +172,7 @@ class EditorModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Trim trailing whitespace (stand-in for a real formatter).
+  /// Trim trailing whitespace.
   void format() {
     _push();
     lines = lines.map((l) => l.replaceFirst(RegExp(r'\s+$'), '')).toList();
@@ -182,6 +187,7 @@ class EditorModel extends ChangeNotifier {
   }
 
   static EditorModel editorTsx() => EditorModel(
+        fileName: 'editor.tsx',
         lines: const [
           "import { useState } from 'react';",
           "import { saveFile } from './fs';",
@@ -207,6 +213,7 @@ class EditorModel extends ChangeNotifier {
       );
 
   static EditorModel fsTs() => EditorModel(
+        fileName: 'fs.ts',
         lines: const [
           "export async function saveFile(path: string, text: string) {",
           r"  await fetch(`/api/files/${path}`, { method: 'PUT', body: text });",
@@ -216,11 +223,68 @@ class EditorModel extends ChangeNotifier {
       );
 
   static EditorModel appTsx() => EditorModel(
+        fileName: 'App.tsx',
         lines: const [
           "import { Editor } from './components/editor';",
           '',
           'export default function App() {',
           "  return <Editor path=\"src/App.tsx\" />;",
+          '}',
+          '',
+        ],
+      );
+
+  static EditorModel mainDart() => EditorModel(
+        fileName: 'main.dart',
+        lines: const [
+          "import 'package:flutter/material.dart';",
+          '',
+          'void main() {',
+          "  runApp(const MaterialApp(home: Text('Hello Lattice!')));",
+          '}',
+          '',
+        ],
+      );
+
+  static EditorModel appPy() => EditorModel(
+        fileName: 'app.py',
+        lines: const [
+          'def calculate_sum(a: int, b: int) -> int:',
+          '    """Returns the sum of two integers."""',
+          '    return a + b',
+          '',
+          'if __name__ == "__main__":',
+          '    print("Sum:", calculate_sum(10, 20))',
+          '',
+        ],
+      );
+
+  static EditorModel nativeCpp() => EditorModel(
+        fileName: 'native.cpp',
+        lines: const [
+          '#include <iostream>',
+          '#include <string>',
+          '',
+          'int main() {',
+          '    std::string greeting = "Hello C++";',
+          '    std::cout << greeting << std::endl;',
+          '    return 0;',
+          '}',
+          '',
+        ],
+      );
+
+  static EditorModel helperKt() => EditorModel(
+        fileName: 'Helper.kt',
+        lines: const [
+          'package com.example.lattice',
+          '',
+          'fun greetUser(name: String): String {',
+          '    return "Hello, \$name!"',
+          '}',
+          '',
+          'fun main() {',
+          '    println(greetUser("Developer"))',
           '}',
           '',
         ],

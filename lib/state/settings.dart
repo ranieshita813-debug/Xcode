@@ -1,8 +1,18 @@
 import 'package:flutter/material.dart';
 
 class AppSettings extends ChangeNotifier {
+  static const List<String> availableFonts = [
+    'IBM Plex Mono',
+    'JetBrains Mono',
+    'Fira Code',
+    'Source Code Pro',
+    'Inconsolata',
+    'Roboto Mono',
+    'Space Mono',
+  ];
+
   ThemeMode themeMode = ThemeMode.dark;
-  String fontFamily = 'JetBrains Mono';
+  String fontFamily = 'IBM Plex Mono';
   double fontSize = 12;
   bool wordWrap = true;
   bool lineNumbers = true;

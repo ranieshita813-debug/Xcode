@@ -14,7 +14,7 @@ class LIconButton extends StatelessWidget {
     this.color,
   });
 
-  final IconData icon;
+  final Widget icon;
   final VoidCallback? onTap;
   final double size;
   final double iconSize;
@@ -22,7 +22,6 @@ class LIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
     return SizedBox(
       width: size,
       height: size,
@@ -32,10 +31,12 @@ class LIconButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: onTap,
-          child: Icon(
-            icon,
-            size: iconSize,
-            color: color ?? (onTap == null ? c.textFaint : c.text),
+          child: Center(
+            child: SizedBox(
+              width: iconSize,
+              height: iconSize,
+              child: icon,
+            ),
           ),
         ),
       ),
