@@ -178,7 +178,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
                                       weight: FontWeight.w600, color: c.text)),
                             ),
                             const SizedBox(width: 8),
-                            _BranchChip(label: 'main'),
+                            const _BranchChip(label: 'main'),
                           ],
                         ),
                       ],
@@ -308,7 +308,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: widget.changeCount > 0
-                              ? c.warning.withOpacity(0.15)
+                              ? c.warning.withValues(alpha: 0.15)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
                         ),
