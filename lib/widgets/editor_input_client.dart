@@ -176,6 +176,8 @@ class EditorInputClient implements DeltaTextInputClient {
     _connection = null;
   }
 
+  bool onFocusReceived() => true;
+
   @override
   void didChangeInputControl(TextInputControl? oldControl, TextInputControl? newControl) {}
 
