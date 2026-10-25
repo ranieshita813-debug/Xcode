@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../models/editor_model.dart';
+import '../services/file_service.dart';
 import '../state/settings.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
@@ -21,6 +22,8 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
+  final FileService _fileService = FileService();
+
   final _models = <String, EditorModel>{
     'editor.tsx': EditorModel.editorTsx(),
     'fs.ts': EditorModel.fsTs(),
@@ -40,6 +43,18 @@ class _EditorScreenState extends State<EditorScreen> {
   BuildResult _build = const BuildResult(errors: []);
 
   EditorModel get _model => _models[_active]!;
+
+  @override
+  void initState() {
+    super.initState();
+    _saveAllToStorage();
+  }
+
+  Future<void> _saveAllToStorage() async {
+    for (final entry in _models.entries) {
+      await _fileService.writeFile(entry.key, entry.value.text);
+    }
+  }
 
   // ---- input routing -----------------------------------------------------
 
@@ -81,7 +96,12 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ---- actions -----------------------------------------------------------
 
-  void _run() {
+  Future<void> _saveCurrentFile() async {
+    await _fileService.writeFile(_active, _model.text);
+    _model.markSaved();
+  }
+
+  void _run() async {
     final src = _model.text;
     final lines = src.split('\n');
     final errors = <String>[];
@@ -96,17 +116,36 @@ class _EditorScreenState extends State<EditorScreen> {
       _build = BuildResult(errors: errors);
       _terminal = true;
     });
-    if (SettingsScope.of(context).autoSave) {
-      _models.values.forEach((m) => m.markSaved());
+
+    await _saveCurrentFile();
+
+    if (mounted && SettingsScope.of(context).autoSave) {
+      for (final entry in _models.entries) {
+        await _fileService.writeFile(entry.key, entry.value.text);
+        entry.value.markSaved();
+      }
     }
   }
 
-  void _openFile(String name) {
-    setState(() {
-      if (_models.containsKey(name)) {
-        if (!_openTabs.contains(name)) _openTabs.add(name);
-        _active = name;
+  Future<void> _openFile(String name) async {
+    if (!_models.containsKey(name)) {
+      if (await _fileService.exists(name)) {
+        final content = await _fileService.readFile(name);
+        _models[name] = EditorModel(
+          fileName: name,
+          lines: content.split('\n'),
+        );
+      } else {
+        _models[name] = EditorModel(
+          fileName: name,
+          lines: const [''],
+        );
       }
+    }
+
+    setState(() {
+      if (!_openTabs.contains(name)) _openTabs.add(name);
+      _active = name;
       _drawer = false;
     });
   }
@@ -141,6 +180,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 onUndo: _model.undo,
                 onRedo: _model.redo,
                 onRun: _run,
+                onSave: _saveCurrentFile,
               ),
               _Tabs(
                 tabs: _openTabs,
@@ -222,6 +262,7 @@ class _AppBar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onRun,
+    required this.onSave,
   });
 
   final String title;
@@ -230,6 +271,7 @@ class _AppBar extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onRun;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +308,11 @@ class _AppBar extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+            const SizedBox(width: 4),
+            LIconButton(
+              icon: iconoir.FloppyDisk(color: c.text, width: 18, height: 18),
+              onTap: onSave,
             ),
             const SizedBox(width: 4),
             LIconButton(

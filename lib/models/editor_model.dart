@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:lattice/models/document.dart';
 
 class Suggestion {
   const Suggestion(this.label, this.kind);
@@ -17,110 +18,87 @@ const kAllSuggestions = <Suggestion>[
   Suggestion('std::cout', 'stream'),
 ];
 
-class _Snapshot {
-  _Snapshot(this.lines, this.row, this.col);
-  final List<String> lines;
-  final int row;
-  final int col;
-}
-
-/// A text buffer: lines + a single cursor, with undo/redo.
+/// Editor model wrapping [TextDocument] (defaults to [LineListDocument])
+/// while maintaining backward compatibility with the existing prototype API.
 class EditorModel extends ChangeNotifier {
   EditorModel({
     required List<String> lines,
-    this.row = 0,
+    int row = 0,
     int? col,
     this.dirty = false,
     this.gitMarks = const {},
     this.fileName = 'editor.tsx',
-  })  : lines = List<String>.of(lines),
-        col = col ?? 0;
+    TextDocument? document,
+  })  : _doc = document ??
+            LineListDocument(
+              initialLines: lines,
+              initialRow: row,
+              initialCol: col ?? 0,
+            ) {
+    _doc.addListener(notifyListeners);
+  }
 
-  List<String> lines;
-  int row;
-  int col;
+  final TextDocument _doc;
   bool dirty;
   String fileName;
-
-  /// line index -> 'added' | 'modified'
   final Map<int, String> gitMarks;
 
-  final List<_Snapshot> _undo = [];
-  final List<_Snapshot> _redo = [];
+  TextDocument get document => _doc;
 
-  String get text => lines.join('\n');
-  String get currentLine => lines[row];
-
-  void _push() {
-    _undo.add(_Snapshot(List<String>.of(lines), row, col));
-    if (_undo.length > 200) _undo.removeAt(0);
-    _redo.clear();
+  List<String> get lines => _doc.lines;
+  set lines(List<String> val) {
+    _doc.setLinesDirectly(val);
   }
 
-  void _restore(_Snapshot s) {
-    lines = List<String>.of(s.lines);
-    row = s.row;
-    col = s.col;
+  int get row => _doc.row;
+  set row(int r) {
+    _doc.cursorPosition = TextPosition(r, col);
   }
 
-  bool get canUndo => _undo.isNotEmpty;
-  bool get canRedo => _redo.isNotEmpty;
+  int get col => _doc.col;
+  set col(int c) {
+    _doc.cursorPosition = TextPosition(row, c);
+  }
+
+  String get text => _doc.text;
+  String get currentLine => _doc.lineAt(row);
+
+  bool get canUndo => _doc.canUndo;
+  bool get canRedo => _doc.canRedo;
 
   void undo() {
-    if (_undo.isEmpty) return;
-    _redo.add(_Snapshot(List<String>.of(lines), row, col));
-    _restore(_undo.removeLast());
+    _doc.undo();
     dirty = true;
-    notifyListeners();
   }
 
   void redo() {
-    if (_redo.isEmpty) return;
-    _undo.add(_Snapshot(List<String>.of(lines), row, col));
-    _restore(_redo.removeLast());
+    _doc.redo();
     dirty = true;
-    notifyListeners();
   }
 
   void insert(String s) {
-    _push();
-    final l = lines[row];
-    lines[row] = l.substring(0, col) + s + l.substring(col);
-    col += s.length;
+    _doc.insertText(row, col, s);
     dirty = true;
-    notifyListeners();
   }
 
   void backspace() {
     if (col == 0 && row == 0) return;
-    _push();
     if (col > 0) {
-      final l = lines[row];
-      lines[row] = l.substring(0, col - 1) + l.substring(col);
-      col -= 1;
-    } else {
+      _doc.deleteRange(TextPosition(row, col - 1), TextPosition(row, col));
+    } else if (row > 0) {
       final prevLen = lines[row - 1].length;
-      lines[row - 1] = lines[row - 1] + lines[row];
-      lines.removeAt(row);
-      row -= 1;
-      col = prevLen;
+      _doc.deleteRange(TextPosition(row - 1, prevLen), TextPosition(row, 0));
     }
     dirty = true;
-    notifyListeners();
   }
 
   void newline() {
-    _push();
-    final l = lines[row];
+    final l = currentLine;
     final indent = RegExp(r'^\s*').stringMatch(l) ?? '';
     final extra = l.substring(0, col).trimRight().endsWith('{') ? '  ' : '';
-    final tail = l.substring(col);
-    lines[row] = l.substring(0, col);
-    lines.insert(row + 1, indent + extra + tail);
-    row += 1;
-    col = indent.length + extra.length;
+    final insertText = '\n$indent$extra';
+    _doc.insertText(row, col, insertText);
     dirty = true;
-    notifyListeners();
   }
 
   void moveHorizontal(int d) {
@@ -139,18 +117,33 @@ class EditorModel extends ChangeNotifier {
         col = 0;
       }
     }
-    notifyListeners();
   }
 
   void moveTo(int r, int c) {
-    row = r.clamp(0, lines.length - 1);
-    col = c.clamp(0, lines[row].length);
-    notifyListeners();
+    final targetRow = r.clamp(0, lines.length - 1);
+    final targetCol = c.clamp(0, lines[targetRow].length);
+    _doc.cursorPosition = TextPosition(targetRow, targetCol);
   }
 
-  /// Word prefix directly before the cursor, e.g. `setD`.
+  void updateState({List<String>? newLines, int? newRow, int? newCol, bool? isDirty}) {
+    if (newLines != null) {
+      _doc.setLinesDirectly(newLines);
+    }
+    if (newRow != null || newCol != null) {
+      final r = newRow ?? row;
+      final c = newCol ?? col;
+      _doc.cursorPosition = TextPosition(r, c);
+    }
+    if (isDirty != null) {
+      dirty = isDirty;
+      notifyListeners();
+    }
+  }
+
   String get prefix {
-    final before = lines[row].substring(0, col);
+    final cur = currentLine;
+    final safeCol = col.clamp(0, cur.length);
+    final before = cur.substring(0, safeCol);
     return RegExp(r'[A-Za-z_$][\w$]*$').stringMatch(before) ?? '';
   }
 
@@ -164,26 +157,27 @@ class EditorModel extends ChangeNotifier {
 
   void applySuggestion(Suggestion s) {
     final p = prefix;
-    _push();
-    final l = lines[row];
-    lines[row] = l.substring(0, col - p.length) + s.label + l.substring(col);
-    col = col - p.length + s.label.length;
+    _doc.replaceRange(TextPosition(row, col - p.length), TextPosition(row, col), s.label);
     dirty = true;
-    notifyListeners();
   }
 
-  /// Trim trailing whitespace.
   void format() {
-    _push();
-    lines = lines.map((l) => l.replaceFirst(RegExp(r'\s+$'), '')).toList();
+    _doc.pushSnapshot();
+    final formatted = lines.map((l) => l.replaceFirst(RegExp(r'\s+$'), '')).toList();
+    lines = formatted;
     col = col.clamp(0, lines[row].length);
     dirty = true;
-    notifyListeners();
   }
 
   void markSaved() {
     dirty = false;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _doc.removeListener(notifyListeners);
+    super.dispose();
   }
 
   static EditorModel editorTsx() => EditorModel(
