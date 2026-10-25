@@ -1,7 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
+import 'package:path/path.dart' as p;
 import '../models/editor_model.dart';
+import '../models/project_search_model.dart';
+import '../models/search_model.dart';
 import '../services/file_service.dart';
+import '../services/session_service.dart';
 import '../state/settings.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
@@ -9,7 +14,9 @@ import '../widgets/code_view.dart';
 import '../widgets/command_palette.dart';
 import '../widgets/common.dart';
 import '../widgets/files_drawer.dart';
+import '../widgets/find_replace_widget.dart';
 import '../widgets/keyboard.dart';
+import '../widgets/project_search_panel.dart';
 import '../widgets/terminal_panel.dart';
 import 'settings_screen.dart';
 import 'source_control_screen.dart';
@@ -21,8 +28,11 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> {
+class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver {
   final FileService _fileService = FileService();
+  final SearchModel _searchModel = SearchModel();
+  late final ProjectSearchModel _projectSearchModel;
+  final SessionService _sessionService = SessionService();
 
   final _models = <String, EditorModel>{
     'editor.tsx': EditorModel.editorTsx(),
@@ -36,18 +46,95 @@ class _EditorScreenState extends State<EditorScreen> {
   final _openTabs = <String>['editor.tsx', 'main.dart', 'app.py'];
   String _active = 'editor.tsx';
 
+  List<TreeNode> _dynamicNodes = [];
+
   bool _drawer = false;
   bool _terminal = false;
-  String? _paletteQuery; // non-null => palette open
+  bool _findPanel = false;
+  bool _projectSearchPanel = false;
+  String? _paletteQuery;
   int _paletteSel = 0;
   BuildResult _build = const BuildResult(errors: []);
 
-  EditorModel get _model => _models[_active]!;
+  EditorModel get _model => _models[_active] ?? EditorModel(fileName: _active, lines: const ['']);
 
   @override
   void initState() {
     super.initState();
-    _saveAllToStorage();
+    WidgetsBinding.instance.addObserver(this);
+    _projectSearchModel = ProjectSearchModel(fileService: _fileService);
+    _initSessionAndStorage();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      _persistSession();
+    }
+  }
+
+  Future<void> _refreshFileTree() async {
+    final entities = await _fileService.listDirectoryEntities();
+    final appDir = await _fileService.getAppDirectory();
+
+    final nodes = <TreeNode>[];
+    for (final e in entities) {
+      final relPath = p.relative(e.path, from: appDir.path);
+      if (relPath.startsWith('.')) continue;
+
+      final isDir = e is Directory;
+      final parts = p.split(relPath);
+      final depth = parts.length - 1;
+      nodes.add(TreeNode(
+        parts.last,
+        depth,
+        folder: isDir,
+        fullPath: relPath,
+      ));
+    }
+
+    if (mounted) {
+      setState(() {
+        _dynamicNodes = nodes;
+      });
+    }
+  }
+
+  Future<void> _initSessionAndStorage() async {
+    await _saveAllToStorage();
+    await _refreshFileTree();
+    final restored = await _sessionService.loadSession();
+    if (restored != null && mounted) {
+      setState(() {
+        _openTabs.clear();
+        _openTabs.addAll(restored.openTabs);
+        if (_openTabs.contains(restored.activeTab)) {
+          _active = restored.activeTab;
+        } else if (_openTabs.isNotEmpty) {
+          _active = _openTabs.first;
+        }
+      });
+    }
+  }
+
+  Future<void> _persistSession() async {
+    final cursors = <String, Map<String, int>>{};
+    _models.forEach((key, model) {
+      cursors[key] = {'row': model.row, 'col': model.col};
+    });
+
+    final state = SessionState(
+      openTabs: _openTabs,
+      activeTab: _active,
+      cursors: cursors,
+    );
+    await _sessionService.saveSession(state);
   }
 
   Future<void> _saveAllToStorage() async {
@@ -55,8 +142,6 @@ class _EditorScreenState extends State<EditorScreen> {
       await _fileService.writeFile(entry.key, entry.value.text);
     }
   }
-
-  // ---- input routing -----------------------------------------------------
 
   void _onKey(String k) {
     switch (k) {
@@ -73,6 +158,7 @@ class _EditorScreenState extends State<EditorScreen> {
       default:
         _model.insert(k);
     }
+    _persistSession();
   }
 
   void _runCommand(PaletteCommand cmd) {
@@ -85,7 +171,7 @@ class _EditorScreenState extends State<EditorScreen> {
       case 'format.sel':
         _model.format();
       case 'goto.line':
-        _model.moveTo(0, 0);
+        setState(() => _findPanel = true);
       case 'wrap':
         SettingsScope.of(context)
             .update((s) => s.wordWrap = !s.wordWrap);
@@ -94,11 +180,11 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  // ---- actions -----------------------------------------------------------
-
   Future<void> _saveCurrentFile() async {
     await _fileService.writeFile(_active, _model.text);
     _model.markSaved();
+    await _refreshFileTree();
+    await _persistSession();
   }
 
   void _run() async {
@@ -147,15 +233,50 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!_openTabs.contains(name)) _openTabs.add(name);
       _active = name;
       _drawer = false;
+      _projectSearchPanel = false;
     });
+    _persistSession();
+  }
+
+  void _closeTab(String tab) {
+    setState(() {
+      _openTabs.remove(tab);
+      if (_openTabs.isNotEmpty) {
+        if (_active == tab) {
+          _active = _openTabs.last;
+        }
+      } else {
+        const newFile = 'untitled.txt';
+        _models[newFile] = EditorModel(fileName: newFile, lines: const ['']);
+        _openTabs.add(newFile);
+        _active = newFile;
+      }
+    });
+    _persistSession();
+  }
+
+  void _createNewTab() async {
+    final newFile = 'untitled_${_openTabs.length + 1}.txt';
+    _models[newFile] = EditorModel(fileName: newFile, lines: const ['']);
+    await _fileService.createFile(newFile);
+    await _refreshFileTree();
+    setState(() {
+      _openTabs.add(newFile);
+      _active = newFile;
+    });
+    _persistSession();
+  }
+
+  void _createNewFolder() async {
+    final folderName = 'new_folder_${_openTabs.length}';
+    await _fileService.createFolder(folderName);
+    await _refreshFileTree();
   }
 
   void _push(Widget page) {
     setState(() => _drawer = false);
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
   }
-
-  // ---- build -------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -181,15 +302,53 @@ class _EditorScreenState extends State<EditorScreen> {
                 onRedo: _model.redo,
                 onRun: _run,
                 onSave: _saveCurrentFile,
+                onFind: () => setState(() => _findPanel = !_findPanel),
+                onProjectSearch: () => setState(() => _projectSearchPanel = !_projectSearchPanel),
               ),
               _Tabs(
                 tabs: _openTabs,
                 active: _active,
                 models: _models,
-                onSelect: (t) => setState(() => _active = t),
+                onSelect: (t) {
+                  setState(() => _active = t);
+                  _persistSession();
+                },
+                onClose: _closeTab,
+                onNewTab: _createNewTab,
               ),
               _Breadcrumb(file: _active),
-              Expanded(child: CodeView(key: ValueKey(_active), model: _model)),
+              Expanded(
+                child: Stack(
+                  children: [
+                    CodeView(key: ValueKey(_active), model: _model),
+                    if (_findPanel)
+                      Positioned(
+                        top: 10,
+                        right: 12,
+                        child: FindReplaceWidget(
+                          model: _model,
+                          searchModel: _searchModel,
+                          onClose: () => setState(() => _findPanel = false),
+                        ),
+                      ),
+                    if (_projectSearchPanel)
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: ProjectSearchPanel(
+                          searchModel: _projectSearchModel,
+                          onSelectResult: (filePath, line, col) {
+                            final fileName = filePath.split('/').last;
+                            _openFile(fileName);
+                            _model.moveTo(line, col);
+                          },
+                          onClose: () => setState(() => _projectSearchPanel = false),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
               if (_terminal)
                 TerminalPanel(
                   result: _build,
@@ -246,6 +405,9 @@ class _EditorScreenState extends State<EditorScreen> {
               onOpenFile: _openFile,
               onOpenSettings: () => _push(const SettingsScreen()),
               onOpenSourceControl: () => _push(const SourceControlScreen()),
+              onCreateFile: _createNewTab,
+              onCreateFolder: _createNewFolder,
+              customNodes: _dynamicNodes.isNotEmpty ? _dynamicNodes : null,
             ),
           ),
         ],
@@ -263,6 +425,8 @@ class _AppBar extends StatelessWidget {
     required this.onRedo,
     required this.onRun,
     required this.onSave,
+    required this.onFind,
+    required this.onProjectSearch,
   });
 
   final String title;
@@ -272,6 +436,8 @@ class _AppBar extends StatelessWidget {
   final VoidCallback onRedo;
   final VoidCallback onRun;
   final VoidCallback onSave;
+  final VoidCallback onFind;
+  final VoidCallback onProjectSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +457,7 @@ class _AppBar extends StatelessWidget {
             Expanded(
               child: InkWell(
                 borderRadius: BorderRadius.circular(8),
-                onTap: onTitle, // opens the command palette
+                onTap: onTitle,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   child: Column(
@@ -308,6 +474,16 @@ class _AppBar extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+            const SizedBox(width: 4),
+            LIconButton(
+              icon: iconoir.Folder(color: c.text, width: 18, height: 18),
+              onTap: onProjectSearch,
+            ),
+            const SizedBox(width: 4),
+            LIconButton(
+              icon: iconoir.Search(color: c.text, width: 18, height: 18),
+              onTap: onFind,
             ),
             const SizedBox(width: 4),
             LIconButton(
@@ -342,12 +518,16 @@ class _Tabs extends StatelessWidget {
     required this.active,
     required this.models,
     required this.onSelect,
+    required this.onClose,
+    required this.onNewTab,
   });
 
   final List<String> tabs;
   final String active;
   final Map<String, EditorModel> models;
   final ValueChanged<String> onSelect;
+  final ValueChanged<String> onClose;
+  final VoidCallback onNewTab;
 
   @override
   Widget build(BuildContext context) {
@@ -375,7 +555,7 @@ class _Tabs extends StatelessWidget {
                     SizedBox(
                       height: 39,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: Row(
                           children: [
                             Text(
@@ -388,22 +568,27 @@ class _Tabs extends StatelessWidget {
                                 color: t == active ? c.text : c.textMuted,
                               ),
                             ),
-                            if (models[t]!.dirty) ...[
-                              const SizedBox(width: 8),
-                              ListenableBuilder(
-                                listenable: models[t]!,
-                                builder: (_, __) => Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: models[t]!.dirty
-                                        ? c.warning
-                                        : Colors.transparent,
-                                    shape: BoxShape.circle,
-                                  ),
+                            if (models[t] != null && models[t]!.dirty) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: c.warning,
+                                  shape: BoxShape.circle,
                                 ),
                               ),
                             ],
+                            const SizedBox(width: 6),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(10),
+                              onTap: () => onClose(t),
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: iconoir.Xmark(
+                                    color: c.textMuted, width: 12, height: 12),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -412,10 +597,13 @@ class _Tabs extends StatelessWidget {
                 ),
               ),
             ),
-          SizedBox(
-            width: 44,
-            child: Center(
-              child: iconoir.Plus(color: c.textMuted, width: 18, height: 18),
+          InkWell(
+            onTap: onNewTab,
+            child: SizedBox(
+              width: 44,
+              child: Center(
+                child: iconoir.Plus(color: c.textMuted, width: 18, height: 18),
+              ),
             ),
           ),
         ],

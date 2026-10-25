@@ -18,7 +18,7 @@ class FileService {
     final dir = await getAppDirectory();
     if (!await dir.exists()) return [];
 
-    final entities = await dir.list().toList();
+    final entities = await dir.list(recursive: true).toList();
     final files = <File>[];
     for (final entity in entities) {
       if (entity is File) {
@@ -27,6 +27,33 @@ class FileService {
     }
     files.sort((a, b) => p.basename(a.path).compareTo(p.basename(b.path)));
     return files;
+  }
+
+  Future<List<FileSystemEntity>> listDirectoryEntities() async {
+    final dir = await getAppDirectory();
+    if (!await dir.exists()) return [];
+    final entities = await dir.list(recursive: true).toList();
+    entities.sort((a, b) => a.path.compareTo(b.path));
+    return entities;
+  }
+
+  Future<Directory> createFolder(String folderNameOrPath) async {
+    final dir = await _resolveDirectory(folderNameOrPath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  Future<File> createFile(String fileNameOrPath, {String content = ''}) async {
+    final file = await _resolveFile(fileNameOrPath);
+    if (!await file.parent.exists()) {
+      await file.parent.create(recursive: true);
+    }
+    if (!await file.exists()) {
+      await file.writeAsString(content);
+    }
+    return file;
   }
 
   Future<String> readFile(String fileNameOrPath) async {
@@ -48,7 +75,7 @@ class FileService {
   Future<void> deleteFile(String fileNameOrPath) async {
     final file = await _resolveFile(fileNameOrPath);
     if (await file.exists()) {
-      await file.delete();
+      await file.delete(recursive: true);
     }
   }
 
@@ -63,5 +90,13 @@ class FileService {
     }
     final dir = await getAppDirectory();
     return File(p.join(dir.path, fileNameOrPath));
+  }
+
+  Future<Directory> _resolveDirectory(String folderNameOrPath) async {
+    if (p.isAbsolute(folderNameOrPath)) {
+      return Directory(folderNameOrPath);
+    }
+    final dir = await getAppDirectory();
+    return Directory(p.join(dir.path, folderNameOrPath));
   }
 }

@@ -140,11 +140,12 @@ class _CodeViewState extends State<CodeView> {
     });
   }
 
-  TextPosition _posFromOffset(Offset localPos, double lineH, double charW) {
+  TextPosition _posFromOffset(Offset localPos, double lineH, double charW, List<int> visibleLineIndices) {
     final lines = widget.model.lines;
     final dy = localPos.dy + _verticalScrollController.offset;
     final dx = localPos.dx + _horizontalScrollController.offset;
-    final r = ((dy - CodeView._topPad) / lineH).floor().clamp(0, lines.length - 1);
+    final vIndex = ((dy - CodeView._topPad) / lineH).floor().clamp(0, visibleLineIndices.isEmpty ? 0 : visibleLineIndices.length - 1);
+    final r = visibleLineIndices.isEmpty ? 0 : visibleLineIndices[vIndex];
     final c = ((dx - CodeView._codeLeft) / charW).round().clamp(0, lines[r].length);
     return TextPosition(r, c);
   }
@@ -231,17 +232,26 @@ class _CodeViewState extends State<CodeView> {
         final foldRegions = _folding.calculateFoldRegions(widget.model.document);
 
         final visibleLineIndices = <int>[];
+        final rowToVIndex = <int, int>{};
         for (var i = 0; i < lines.length; i++) {
           if (!_folding.isLineHidden(i, foldRegions)) {
+            rowToVIndex[i] = visibleLineIndices.length;
             visibleLineIndices.add(i);
           }
         }
 
-        final longestLineLength = lines.fold<int>(0, (m, l) => l.length > m ? l.length : m);
+        final sampleCount = min(100, lines.length);
+        var longestLineLength = 0;
+        for (var i = 0; i < sampleCount; i++) {
+          if (lines[i].length > longestLineLength) {
+            longestLineLength = lines[i].length;
+          }
+        }
         final minContentWidth = CodeView._codeLeft + (longestLineLength + 6) * charW;
 
+        final caretVIndex = rowToVIndex[caretRow] ?? 0;
         final caretX = CodeView._codeLeft + caretCol * charW;
-        final caretY = CodeView._topPad + caretRow * lineH;
+        final caretY = CodeView._topPad + caretVIndex * lineH;
 
         final hasSelection = _selectionStart != null && _selectionEnd != null && _selectionStart != _selectionEnd;
 
@@ -260,8 +270,11 @@ class _CodeViewState extends State<CodeView> {
 
         final scrollOffset = _verticalScrollController.hasClients ? _verticalScrollController.offset : 0.0;
         final viewportHeight = MediaQuery.of(context).size.height;
-        final firstVisibleRow = max(0, ((scrollOffset - CodeView._topPad) / lineH).floor() - 2);
-        final lastVisibleRow = min(lines.length - 1, (((scrollOffset + viewportHeight) - CodeView._topPad) / lineH).ceil() + 2);
+        final firstVisibleVIndex = max(0, ((scrollOffset - CodeView._topPad) / lineH).floor() - 2);
+        final lastVisibleVIndex = min(visibleLineIndices.length - 1, (((scrollOffset + viewportHeight) - CodeView._topPad) / lineH).ceil() + 2);
+
+        final normStartVIndex = rowToVIndex[normStart.row] ?? 0;
+        final normEndVIndex = rowToVIndex[normEnd.row] ?? 0;
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -271,18 +284,18 @@ class _CodeViewState extends State<CodeView> {
               _clearSelection();
               return;
             }
-            final pos = _posFromOffset(details.localPosition, lineH, charW);
+            final pos = _posFromOffset(details.localPosition, lineH, charW, visibleLineIndices);
             _inputClient.updateModelSelection(pos.row, pos.col);
           },
           onLongPressStart: (details) {
-            final pos = _posFromOffset(details.localPosition, lineH, charW);
+            final pos = _posFromOffset(details.localPosition, lineH, charW, visibleLineIndices);
             _selectWordAt(pos.row, pos.col);
             setState(() {
               _magnifierPos = details.localPosition;
             });
           },
           onLongPressMoveUpdate: (details) {
-            final pos = _posFromOffset(details.localPosition, lineH, charW);
+            final pos = _posFromOffset(details.localPosition, lineH, charW, visibleLineIndices);
             setState(() {
               _selectionEnd = pos;
               _magnifierPos = details.localPosition;
@@ -407,22 +420,22 @@ class _CodeViewState extends State<CodeView> {
                         ),
                         // Virtualized Selection Highlight Layer
                         if (hasSelection) ...[
-                          for (var r = max(normStart.row, firstVisibleRow); r <= min(normEnd.row, lastVisibleRow); r++)
+                          for (var vIdx = max(normStartVIndex, firstVisibleVIndex); vIdx <= min(normEndVIndex, lastVisibleVIndex); vIdx++)
                             Positioned(
-                              left: CodeView._codeLeft + (r == normStart.row ? normStart.col : 0) * charW,
-                              top: CodeView._topPad + r * lineH - scrollOffset,
-                              width: max(1.0, ((r == normEnd.row ? normEnd.col : lines[r].length) -
-                                      (r == normStart.row ? normStart.col : 0)) * charW),
+                              left: CodeView._codeLeft + (vIdx == normStartVIndex ? normStart.col : 0) * charW,
+                              top: CodeView._topPad + vIdx * lineH - scrollOffset,
+                              width: max(1.0, ((vIdx == normEndVIndex ? normEnd.col : lines[visibleLineIndices[vIdx]].length) -
+                                      (vIdx == normStartVIndex ? normStart.col : 0)) * charW),
                               height: lineH,
                               child: ColoredBox(color: c.accentSoft),
                             ),
                           // Selection Handles
                           Positioned(
                             left: CodeView._codeLeft + normStart.col * charW - 10,
-                            top: CodeView._topPad + normStart.row * lineH + lineH - scrollOffset,
+                            top: CodeView._topPad + normStartVIndex * lineH + lineH - scrollOffset,
                             child: GestureDetector(
                               onPanUpdate: (d) {
-                                final pos = _posFromOffset(d.globalPosition, lineH, charW);
+                                final pos = _posFromOffset(d.globalPosition, lineH, charW, visibleLineIndices);
                                 setState(() {
                                   _selectionStart = pos;
                                   _magnifierPos = d.localPosition;
@@ -436,10 +449,10 @@ class _CodeViewState extends State<CodeView> {
                           ),
                           Positioned(
                             left: CodeView._codeLeft + normEnd.col * charW - 10,
-                            top: CodeView._topPad + normEnd.row * lineH + lineH - scrollOffset,
+                            top: CodeView._topPad + normEndVIndex * lineH + lineH - scrollOffset,
                             child: GestureDetector(
                               onPanUpdate: (d) {
-                                final pos = _posFromOffset(d.globalPosition, lineH, charW);
+                                final pos = _posFromOffset(d.globalPosition, lineH, charW, visibleLineIndices);
                                 setState(() {
                                   _selectionEnd = pos;
                                   _magnifierPos = d.localPosition;
@@ -482,7 +495,7 @@ class _CodeViewState extends State<CodeView> {
               // Floating Action Toolbar on Selection
               if (hasSelection)
                 Positioned(
-                  top: CodeView._topPad + normStart.row * lineH - 48 - scrollOffset,
+                  top: CodeView._topPad + normStartVIndex * lineH - 48 - scrollOffset,
                   left: CodeView._codeLeft + normStart.col * charW,
                   child: _FloatingToolbar(
                     onCut: _cutSelection,

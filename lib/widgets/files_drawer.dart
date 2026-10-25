@@ -4,35 +4,19 @@ import '../theme/tokens.dart';
 import '../theme/typography.dart';
 import 'common.dart';
 
-class _Node {
-  const _Node(this.name, this.depth,
-      {this.folder = false, this.open = false, this.status});
+class TreeNode {
+  const TreeNode(this.name, this.depth,
+      {this.folder = false, this.open = false, this.status, this.fullPath = ''});
   final String name;
   final int depth;
   final bool folder;
   final bool open;
-  final String? status; // 'M' | 'A'
+  final String? status;
+  final String fullPath;
 }
 
-const _tree = <_Node>[
-  _Node('src', 0, folder: true, open: true),
-  _Node('components', 1, folder: true, open: true),
-  _Node('editor.tsx', 2, status: 'M'),
-  _Node('Tabs.tsx', 2, status: 'A'),
-  _Node('fs.ts', 1, status: 'M'),
-  _Node('App.tsx', 1),
-  _Node('main.dart', 1),
-  _Node('app.py', 1),
-  _Node('native.cpp', 1),
-  _Node('Helper.kt', 1),
-  _Node('assets', 0, folder: true),
-  _Node('package.json', 0),
-  _Node('tsconfig.json', 0),
-  _Node('README.md', 0),
-];
-
-/// Left side drawer from the "02 Files" frame.
-class FilesDrawer extends StatelessWidget {
+/// Dynamic Left side drawer displaying storage file tree.
+class FilesDrawer extends StatefulWidget {
   const FilesDrawer({
     super.key,
     required this.activeFile,
@@ -40,6 +24,9 @@ class FilesDrawer extends StatelessWidget {
     required this.onOpenFile,
     required this.onOpenSettings,
     required this.onOpenSourceControl,
+    this.onCreateFile,
+    this.onCreateFolder,
+    this.customNodes,
   });
 
   final String activeFile;
@@ -47,10 +34,55 @@ class FilesDrawer extends StatelessWidget {
   final ValueChanged<String> onOpenFile;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenSourceControl;
+  final VoidCallback? onCreateFile;
+  final VoidCallback? onCreateFolder;
+  final List<TreeNode>? customNodes;
+
+  @override
+  State<FilesDrawer> createState() => _FilesDrawerState();
+}
+
+class _FilesDrawerState extends State<FilesDrawer> {
+  static const _defaultTree = <TreeNode>[
+    TreeNode('src', 0, folder: true, open: true),
+    TreeNode('components', 1, folder: true, open: true),
+    TreeNode('editor.tsx', 2, status: 'M'),
+    TreeNode('Tabs.tsx', 2, status: 'A'),
+    TreeNode('fs.ts', 1, status: 'M'),
+    TreeNode('App.tsx', 1),
+    TreeNode('main.dart', 1),
+    TreeNode('app.py', 1),
+    TreeNode('native.cpp', 1),
+    TreeNode('Helper.kt', 1),
+    TreeNode('assets', 0, folder: true),
+    TreeNode('package.json', 0),
+    TreeNode('tsconfig.json', 0),
+    TreeNode('README.md', 0),
+  ];
+
+  late Set<String> _openFolders;
+
+  @override
+  void initState() {
+    super.initState();
+    _openFolders = {'src', 'components', 'assets'};
+  }
+
+  void _toggleFolder(String name) {
+    setState(() {
+      if (_openFolders.contains(name)) {
+        _openFolders.remove(name);
+      } else {
+        _openFolders.add(name);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final nodes = widget.customNodes ?? _defaultTree;
+
     return Container(
       width: 316,
       decoration: BoxDecoration(
@@ -99,13 +131,13 @@ class FilesDrawer extends StatelessWidget {
                       icon: iconoir.PagePlus(
                           color: c.text, width: 18, height: 18),
                       size: 36,
-                      onTap: () {}),
+                      onTap: widget.onCreateFile ?? () {}),
                   const SizedBox(width: 10),
                   LIconButton(
                       icon: iconoir.FolderPlus(
                           color: c.text, width: 18, height: 18),
                       size: 36,
-                      onTap: () {}),
+                      onTap: widget.onCreateFolder ?? () {}),
                 ],
               ),
             ),
@@ -136,11 +168,20 @@ class FilesDrawer extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 children: [
-                  for (final n in _tree)
+                  for (final n in nodes)
                     _Row(
-                      node: n,
-                      active: n.name == activeFile,
-                      onTap: n.folder ? null : () => onOpenFile(n.name),
+                      node: TreeNode(
+                        n.name,
+                        n.depth,
+                        folder: n.folder,
+                        open: _openFolders.contains(n.name),
+                        status: n.status,
+                        fullPath: n.fullPath,
+                      ),
+                      active: n.name == widget.activeFile,
+                      onTap: n.folder
+                          ? () => _toggleFolder(n.name)
+                          : () => widget.onOpenFile(n.name),
                     ),
                 ],
               ),
@@ -153,7 +194,7 @@ class FilesDrawer extends StatelessWidget {
                 children: [
                   Expanded(
                     child: InkWell(
-                      onTap: onOpenSettings,
+                      onTap: widget.onOpenSettings,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
@@ -170,11 +211,11 @@ class FilesDrawer extends StatelessWidget {
                     ),
                   ),
                   InkWell(
-                    onTap: onOpenSourceControl,
+                    onTap: widget.onOpenSourceControl,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 20),
-                      child: Text('$changeCount changes',
+                      child: Text('${widget.changeCount} changes',
                           style: LatticeText.ui(12, color: c.warning)),
                     ),
                   ),
@@ -190,7 +231,7 @@ class FilesDrawer extends StatelessWidget {
 
 class _Row extends StatelessWidget {
   const _Row({required this.node, required this.active, this.onTap});
-  final _Node node;
+  final TreeNode node;
   final bool active;
   final VoidCallback? onTap;
 
