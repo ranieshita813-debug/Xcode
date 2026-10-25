@@ -258,7 +258,7 @@ class _CodeViewState extends State<CodeView> {
   void _recompute() {
     final lines = widget.model.lines;
     _regions = _folding.calculateFoldRegions(widget.model.document);
-    _foldStarts = {for (final r in _regions) r.startLine as int};
+    _foldStarts = {for (final r in _regions) r.startLine};
     final anyFolded = _foldStarts.any(_folding.isLineFolded);
     _visible = anyFolded
         ? [
@@ -308,7 +308,7 @@ class _CodeViewState extends State<CodeView> {
   TextPosition _posFromLocal(Offset p) {
     final lines = widget.model.lines;
     final count = _count;
-    if (count == 0) return TextPosition(0, 0);
+    if (count == 0) return const TextPosition(0, 0);
     final v = ((p.dy - CodeView._topPad + _vOff) / _lineH).floor().clamp(0, count - 1);
     final row = _rowAt(v);
     final col = ((p.dx + _hOff - _codeLeft) / _charW).round().clamp(0, lines[row].length);
@@ -343,8 +343,8 @@ class _CodeViewState extends State<CodeView> {
       _selectionStart != null && _selectionEnd != null && _selectionStart != _selectionEnd;
 
   (TextPosition, TextPosition) _norm() {
-    final a = _selectionStart ?? TextPosition(0, 0);
-    final b = _selectionEnd ?? TextPosition(0, 0);
+    final a = _selectionStart ?? const TextPosition(0, 0);
+    final b = _selectionEnd ?? const TextPosition(0, 0);
     final swap = a.row > b.row || (a.row == b.row && a.col > b.col);
     return swap ? (b, a) : (a, b);
   }
@@ -413,7 +413,7 @@ class _CodeViewState extends State<CodeView> {
     final lines = widget.model.lines;
     if (lines.isEmpty) return;
     setState(() {
-      _selectionStart = TextPosition(0, 0);
+      _selectionStart = const TextPosition(0, 0);
       _selectionEnd = TextPosition(lines.length - 1, lines.last.length);
     });
   }
@@ -435,7 +435,7 @@ class _CodeViewState extends State<CodeView> {
         : ns.row == ne.row
             ? ' (${ne.col - ns.col} selected)'
             : ' (${ne.row - ns.row + 1} lines selected)';
-    final name = m.fileName ?? '';
+    final name = m.fileName;
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return Column(
       children: [
@@ -899,9 +899,10 @@ class _CodeViewState extends State<CodeView> {
       var ty = _yOfRow(ns.row) - 46;
       if (ty < 4) ty = _yOfRow(ne.row) + lineH + 36;
       final tx = _xOfCol(ns.col)
-          .clamp(8.0, max(8.0, _viewport.width - CodeView._toolbarW - 8));
+          .clamp(8.0, max(8.0, _viewport.width - CodeView._toolbarW - 8.0))
+          .toDouble();
       children.add(Positioned(
-        top: ty.clamp(4.0, max(4.0, _viewport.height - 48)),
+        top: ty.clamp(4.0, max(4.0, _viewport.height - 48.0)).toDouble(),
         left: tx,
         child: _FloatingToolbar(
           onCut: _cutSelection,
@@ -916,8 +917,8 @@ class _CodeViewState extends State<CodeView> {
       final below = cy + lineH + 4;
       final top = below + popH > _viewport.height ? cy - popH - 4 : below;
       children.add(Positioned(
-        left: _xOfCol(m.col).clamp(4.0, max(4.0, _viewport.width - 244)),
-        top: max(4.0, top),
+        left: _xOfCol(m.col).clamp(4.0, max(4.0, _viewport.width - 244.0)).toDouble(),
+        top: max(4.0, top).toDouble(),
         child: _Autocomplete(
           suggestions: suggestions,
           prefix: m.prefix,
@@ -1163,7 +1164,7 @@ class _MinimapPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = m.bg);
     canvas.drawLine(Offset.zero, Offset(0, size.height), Paint()..color = m.border);
-    final ink = Paint()..color = m.ink.withOpacity(0.45);
+    final ink = Paint()..color = m.ink.withValues(alpha: 0.45);
     final step = max(1, (1 / scale).ceil());
     for (var i = 0; i < m.count; i += step) {
       final l = m.lines[m.rowAt(i)];
@@ -1180,7 +1181,7 @@ class _MinimapPainter extends CustomPainter {
       final top = p.pixels / m.lineH * scale;
       final h = p.viewportDimension / m.lineH * scale;
       canvas.drawRect(Rect.fromLTWH(0, top, size.width, h),
-          Paint()..color = m.slider.withOpacity(0.12));
+          Paint()..color = m.slider.withValues(alpha: 0.12));
     }
   }
 
