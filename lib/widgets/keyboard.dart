@@ -17,8 +17,6 @@ class _KeyCap extends StatelessWidget {
   const _KeyCap({
     required this.label,
     required this.onTap,
-    this.color,
-    this.textColor,
     this.height = 36,
     this.radius = 8,
     this.fontSize = 15,
@@ -26,8 +24,6 @@ class _KeyCap extends StatelessWidget {
 
   final String label;
   final VoidCallback onTap;
-  final Color? color;
-  final Color? textColor;
   final double height;
   final double radius;
   final double fontSize;
@@ -36,7 +32,7 @@ class _KeyCap extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     return Material(
-      color: color ?? c.key,
+      color: c.key,
       borderRadius: BorderRadius.circular(radius),
       child: InkWell(
         borderRadius: BorderRadius.circular(radius),
@@ -47,7 +43,7 @@ class _KeyCap extends StatelessWidget {
             child: Text(
               label,
               style: LatticeText.ui(fontSize,
-                  weight: FontWeight.w500, color: textColor ?? c.text),
+                  weight: FontWeight.w500, color: c.text),
             ),
           ),
         ),

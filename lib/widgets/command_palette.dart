@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
-import 'common.dart';
 
 class PaletteCommand {
   const PaletteCommand(this.id, this.title, this.iconBuilder, this.category);
