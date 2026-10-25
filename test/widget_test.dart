@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lattice/models/editor_model.dart';
 import 'package:lattice/models/highlighter.dart';
+import 'package:lattice/screens/settings_screen.dart';
+import 'package:lattice/state/settings.dart';
+import 'package:lattice/theme/app_theme.dart';
 import 'package:lattice/theme/tokens.dart';
 
 void main() {
@@ -51,5 +54,38 @@ void main() {
 
     final ktSpan = highlightLine('fun main() {}', c, style, fileName: 'Helper.kt');
     expect(ktSpan.children, isNotEmpty);
+  });
+
+  testWidgets('SettingsScreen opens font picker sheet and selects font', (tester) async {
+    final settings = AppSettings();
+    await tester.pumpWidget(
+      SettingsScope(
+        settings: settings,
+        child: MaterialApp(
+          theme: buildTheme(LatticeColors.dark, Brightness.dark),
+          home: const SettingsScreen(),
+        ),
+      ),
+    );
+
+    expect(find.text('Select Coding Font'), findsNothing);
+
+    // Tap Font row
+    await tester.tap(find.text('Font'));
+    await tester.pumpAndSettle();
+
+    // Verify modal bottom sheet is shown
+    expect(find.text('Select Coding Font'), findsOneWidget);
+    expect(find.byType(Divider), findsOneWidget);
+    final divider = tester.widget<Divider>(find.byType(Divider));
+    expect(divider.height, equals(1));
+
+    // Tap Fira Code font
+    await tester.tap(find.text('Fira Code'));
+    await tester.pumpAndSettle();
+
+    // Verify sheet closed and settings updated
+    expect(find.text('Select Coding Font'), findsNothing);
+    expect(settings.fontFamily, equals('Fira Code'));
   });
 }

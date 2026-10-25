@@ -29,7 +29,7 @@ class SettingsScreen extends StatelessWidget {
                       weight: FontWeight.w600, color: c.text),
                 ),
               ),
-              Divider(color: c.border),
+              Divider(height: 1, color: c.border),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
