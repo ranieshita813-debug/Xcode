@@ -40,6 +40,7 @@ abstract class TextDocument extends ChangeNotifier {
   void insertText(int row, int col, String text);
   void deleteRange(TextPosition start, TextPosition end);
   void replaceRange(TextPosition start, TextPosition end, String text);
+  void replaceRangeWithoutSnapshot(TextPosition start, TextPosition end, String text);
   void setLinesDirectly(List<String> newLines);
 
   bool get canUndo;
@@ -56,7 +57,7 @@ class DocumentSnapshot {
   final int col;
 }
 
-/// Line-list implementation of [TextDocument].
+/// Line-list implementation of [TextDocument] with typing burst undo grouping.
 class LineListDocument extends TextDocument {
   LineListDocument({
     List<String>? initialLines,
@@ -69,6 +70,9 @@ class LineListDocument extends TextDocument {
   List<String> _lines;
   int _row;
   int _col;
+
+  DateTime? _lastEditTime;
+  int? _lastEditRow;
 
   final List<DocumentSnapshot> _undoStack = [];
   final List<DocumentSnapshot> _redoStack = [];
@@ -144,6 +148,8 @@ class LineListDocument extends TextDocument {
     _undoStack.add(DocumentSnapshot(List<String>.of(_lines), _row, _col));
     if (_undoStack.length > 200) _undoStack.removeAt(0);
     _redoStack.clear();
+    _lastEditTime = null;
+    _lastEditRow = null;
   }
 
   @override
@@ -161,6 +167,8 @@ class LineListDocument extends TextDocument {
     if (_lines.isEmpty) _lines.add('');
     _row = snap.row.clamp(0, _lines.length - 1);
     _col = snap.col.clamp(0, _lines[_row].length);
+    _lastEditTime = null;
+    _lastEditRow = null;
     notifyListeners();
   }
 
@@ -173,6 +181,8 @@ class LineListDocument extends TextDocument {
     if (_lines.isEmpty) _lines.add('');
     _row = snap.row.clamp(0, _lines.length - 1);
     _col = snap.col.clamp(0, _lines[_row].length);
+    _lastEditTime = null;
+    _lastEditRow = null;
     notifyListeners();
   }
 
@@ -204,7 +214,20 @@ class LineListDocument extends TextDocument {
 
   @override
   void insertText(int r, int c, String insert) {
-    pushSnapshot();
+    final now = DateTime.now();
+    final isBurst = _lastEditTime != null &&
+        _lastEditRow == r &&
+        insert.length == 1 &&
+        insert != ' ' &&
+        insert != '\n' &&
+        now.difference(_lastEditTime!).inMilliseconds < 1200;
+
+    if (!isBurst) {
+      pushSnapshot();
+    }
+
+    _lastEditTime = now;
+    _lastEditRow = r;
     _insertWithoutSnapshot(r, c, insert);
     notifyListeners();
   }
@@ -242,6 +265,13 @@ class LineListDocument extends TextDocument {
   @override
   void replaceRange(TextPosition start, TextPosition end, String text) {
     pushSnapshot();
+    _deleteWithoutSnapshot(start, end);
+    _insertWithoutSnapshot(_row, _col, text);
+    notifyListeners();
+  }
+
+  @override
+  void replaceRangeWithoutSnapshot(TextPosition start, TextPosition end, String text) {
     _deleteWithoutSnapshot(start, end);
     _insertWithoutSnapshot(_row, _col, text);
     notifyListeners();

@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import '../models/document.dart';
 import '../models/editor_model.dart';
 
 int _rowColToOffset(List<String> lines, int row, int col) {
@@ -97,6 +98,7 @@ class EditorInputClient implements DeltaTextInputClient {
     var newText = _currentValue.text;
     var selectionStart = _currentValue.selection.start;
     TextRange newComposing = _composing;
+    var hasTextChanges = false;
 
     for (final delta in deltas) {
       if (delta is TextEditingDeltaInsertion) {
@@ -105,6 +107,7 @@ class EditorInputClient implements DeltaTextInputClient {
         newText = newText.replaceRange(insertOffset, insertOffset, inserted);
         selectionStart = insertOffset + inserted.length;
         newComposing = delta.composing;
+        hasTextChanges = true;
       } else if (delta is TextEditingDeltaDeletion) {
         final start = delta.deletedRange.start;
         final end = delta.deletedRange.end;
@@ -113,6 +116,7 @@ class EditorInputClient implements DeltaTextInputClient {
           selectionStart = start;
         }
         newComposing = delta.composing;
+        hasTextChanges = true;
       } else if (delta is TextEditingDeltaReplacement) {
         final start = delta.replacedRange.start;
         final end = delta.replacedRange.end;
@@ -122,6 +126,7 @@ class EditorInputClient implements DeltaTextInputClient {
           selectionStart = start + replacement.length;
         }
         newComposing = delta.composing;
+        hasTextChanges = true;
       } else if (delta is TextEditingDeltaNonTextUpdate) {
         selectionStart = delta.selection.start;
         newComposing = delta.composing;
@@ -133,12 +138,20 @@ class EditorInputClient implements DeltaTextInputClient {
     final lines = newText.split('\n');
     final (row, col) = _offsetToRowCol(lines, selectionStart);
 
-    model.updateState(
-      newLines: lines,
-      newRow: row,
-      newCol: col,
-      isDirty: true,
-    );
+    if (hasTextChanges) {
+      const oldPosStart = TextPosition(0, 0);
+      final oldPosEnd = model.document.offsetToPosition(model.text.length);
+      model.document.replaceRange(oldPosStart, oldPosEnd, newText);
+      model.document.cursorPosition = TextPosition(row, col);
+      model.dirty = true;
+    } else {
+      model.updateState(
+        newLines: lines,
+        newRow: row,
+        newCol: col,
+        isDirty: true,
+      );
+    }
 
     _syncValueFromModel();
     onEditingChanged();
@@ -152,12 +165,21 @@ class EditorInputClient implements DeltaTextInputClient {
     final lines = value.text.split('\n');
     final (row, col) = _offsetToRowCol(lines, value.selection.baseOffset);
 
-    model.updateState(
-      newLines: lines,
-      newRow: row,
-      newCol: col,
-      isDirty: true,
-    );
+    if (value.text != model.text) {
+      const oldPosStart = TextPosition(0, 0);
+      final oldPosEnd = model.document.offsetToPosition(model.text.length);
+      model.document.replaceRange(oldPosStart, oldPosEnd, value.text);
+      model.document.cursorPosition = TextPosition(row, col);
+      model.dirty = true;
+    } else {
+      model.updateState(
+        newLines: lines,
+        newRow: row,
+        newCol: col,
+        isDirty: true,
+      );
+    }
+
     onEditingChanged();
   }
 

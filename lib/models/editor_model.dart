@@ -43,6 +43,14 @@ class EditorModel extends ChangeNotifier {
   String fileName;
   final Map<int, String> gitMarks;
 
+  static const _autoPairs = {
+    '(': ')',
+    '[': ']',
+    '{': '}',
+    '"': '"',
+    "'": "'",
+  };
+
   TextDocument get document => _doc;
 
   List<String> get lines => _doc.lines;
@@ -77,6 +85,13 @@ class EditorModel extends ChangeNotifier {
   }
 
   void insert(String s) {
+    if (_autoPairs.containsKey(s)) {
+      final closing = _autoPairs[s]!;
+      _doc.insertText(row, col, '$s$closing');
+      _doc.cursorPosition = TextPosition(row, col - 1);
+      dirty = true;
+      return;
+    }
     _doc.insertText(row, col, s);
     dirty = true;
   }
