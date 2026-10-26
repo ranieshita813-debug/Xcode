@@ -23,3 +23,14 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/fonts/
+
+  fonts:
+    - family: Space Grotesk
+      fonts:
+        - asset: assets/fonts/SpaceGrotesk-Regular.ttf
+    - family: Iosevka
+      fonts:
+        - asset: assets/fonts/Iosevka-Regular.ttf

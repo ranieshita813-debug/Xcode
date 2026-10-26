@@ -1,15 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:highlight/highlight.dart' show highlight, Node;
+import 'package:highlight/languages/bash.dart';
+import 'package:highlight/languages/clojure.dart';
 import 'package:highlight/languages/cpp.dart';
+import 'package:highlight/languages/cs.dart';
 import 'package:highlight/languages/css.dart';
 import 'package:highlight/languages/dart.dart';
+import 'package:highlight/languages/dockerfile.dart';
 import 'package:highlight/languages/go.dart';
+import 'package:highlight/languages/graphql.dart';
+import 'package:highlight/languages/ini.dart';
 import 'package:highlight/languages/java.dart';
 import 'package:highlight/languages/javascript.dart';
 import 'package:highlight/languages/json.dart';
 import 'package:highlight/languages/kotlin.dart';
+import 'package:highlight/languages/markdown.dart';
+import 'package:highlight/languages/objectivec.dart';
+import 'package:highlight/languages/php.dart';
 import 'package:highlight/languages/python.dart';
+import 'package:highlight/languages/r.dart';
+import 'package:highlight/languages/ruby.dart';
 import 'package:highlight/languages/rust.dart';
+import 'package:highlight/languages/scss.dart';
+import 'package:highlight/languages/sql.dart';
+import 'package:highlight/languages/swift.dart';
 import 'package:highlight/languages/typescript.dart';
 import 'package:highlight/languages/xml.dart';
 import 'package:highlight/languages/yaml.dart';
@@ -31,10 +45,24 @@ void _ensureInitialized() {
   highlight.registerLanguage('json', json);
   highlight.registerLanguage('xml', xml);
   highlight.registerLanguage('css', css);
+  highlight.registerLanguage('scss', scss);
   highlight.registerLanguage('java', java);
   highlight.registerLanguage('rust', rust);
   highlight.registerLanguage('go', go);
   highlight.registerLanguage('yaml', yaml);
+  highlight.registerLanguage('bash', bash);
+  highlight.registerLanguage('cs', cs);
+  highlight.registerLanguage('php', php);
+  highlight.registerLanguage('swift', swift);
+  highlight.registerLanguage('ruby', ruby);
+  highlight.registerLanguage('sql', sql);
+  highlight.registerLanguage('markdown', markdown);
+  highlight.registerLanguage('dockerfile', dockerfile);
+  highlight.registerLanguage('graphql', graphql);
+  highlight.registerLanguage('ini', ini);
+  highlight.registerLanguage('objectivec', objectivec);
+  highlight.registerLanguage('clojure', clojure);
+  highlight.registerLanguage('r', r);
 }
 
 /// Detects syntax language from file extension.
@@ -68,9 +96,14 @@ String detectLanguage(String? fileName) {
     case 'html':
     case 'htm':
     case 'xml':
+    case 'svg':
       return 'xml';
     case 'css':
       return 'css';
+    case 'scss':
+    case 'sass':
+    case 'less':
+      return 'scss';
     case 'java':
       return 'java';
     case 'rs':
@@ -80,6 +113,39 @@ String detectLanguage(String? fileName) {
     case 'yaml':
     case 'yml':
       return 'yaml';
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+      return 'bash';
+    case 'cs':
+      return 'cs';
+    case 'php':
+      return 'php';
+    case 'swift':
+      return 'swift';
+    case 'rb':
+      return 'ruby';
+    case 'sql':
+      return 'sql';
+    case 'md':
+    case 'markdown':
+      return 'markdown';
+    case 'dockerfile':
+      return 'dockerfile';
+    case 'gql':
+    case 'graphql':
+      return 'graphql';
+    case 'ini':
+    case 'conf':
+    case 'env':
+      return 'ini';
+    case 'm':
+    case 'mm':
+      return 'objectivec';
+    case 'clj':
+      return 'clojure';
+    case 'r':
+      return 'r';
     default:
       return 'javascript';
   }
@@ -137,7 +203,7 @@ TextSpan _convertNode(Node node, LatticeColors c, TextStyle base, {String? paren
   return TextSpan(text: '', style: style);
 }
 
-/// Tokenizer that highlights code for JS, Dart, Kotlin, C++, Python, and more.
+/// Tokenizer that highlights code for Dart, C, C++, Java, JS, JSX, TS, TSX, Python, HTML, CSS, SCSS, Rust, Go, Swift, Kotlin, Bash, C#, PHP, SQL, Markdown, Dockerfile, YAML, etc.
 TextSpan highlightLine(
   String line,
   LatticeColors c,

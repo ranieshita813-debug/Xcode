@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/editor_screen.dart';
+import 'screens/splash_screen.dart';
 import 'state/settings.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
@@ -41,7 +41,7 @@ class _LatticeAppState extends State<LatticeApp> {
           themeMode: _settings.themeMode,
           theme: buildTheme(LatticeColors.light, Brightness.light),
           darkTheme: buildTheme(LatticeColors.dark, Brightness.dark),
-          home: const EditorScreen(),
+          home: const SplashScreen(),
         ),
       ),
     );
