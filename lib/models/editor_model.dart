@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:lattice/models/document.dart';
+import 'package:lattice/services/lsp_service.dart';
 
 class Suggestion {
   const Suggestion(this.label, this.kind);
@@ -18,6 +19,8 @@ const kAllSuggestions = <Suggestion>[
   Suggestion('std::cout', 'stream'),
 ];
 
+final LspService _sharedLsp = LspService();
+
 /// Editor model wrapping [TextDocument] (defaults to [LineListDocument])
 /// while maintaining backward compatibility with the existing prototype API.
 class EditorModel extends ChangeNotifier {
@@ -29,16 +32,21 @@ class EditorModel extends ChangeNotifier {
     this.gitMarks = const {},
     this.fileName = 'editor.tsx',
     TextDocument? document,
-  })  : _doc = document ??
+    LspService? lspService,
+  })  : lspService = lspService ?? _sharedLsp,
+        _doc = document ??
             LineListDocument(
               initialLines: lines,
               initialRow: row,
               initialCol: col ?? 0,
             ) {
-    _doc.addListener(notifyListeners);
+    _doc.addListener(_handleDocChanged);
+    _analyzeLsp();
   }
 
   final TextDocument _doc;
+  final LspService lspService;
+  List<LspDiagnostic> diagnostics = [];
   bool dirty;
   String fileName;
   final Map<int, String> gitMarks;
@@ -50,6 +58,15 @@ class EditorModel extends ChangeNotifier {
     '"': '"',
     "'": "'",
   };
+
+  void _handleDocChanged() {
+    _analyzeLsp();
+    notifyListeners();
+  }
+
+  void _analyzeLsp() {
+    diagnostics = lspService.analyze(fileName, text);
+  }
 
   TextDocument get document => _doc;
 
@@ -165,9 +182,15 @@ class EditorModel extends ChangeNotifier {
   List<Suggestion> get suggestions {
     final p = prefix;
     if (p.length < 2) return const [];
-    return kAllSuggestions
-        .where((s) => s.label.startsWith(p) && s.label != p)
-        .toList();
+    final completions = lspService.getCompletions(fileName, text, row, col, p);
+    final results = completions.map((c) => Suggestion(c.label, c.kind)).toList();
+
+    for (final s in kAllSuggestions) {
+      if (s.label.startsWith(p) && s.label != p && !results.any((r) => r.label == s.label)) {
+        results.add(s);
+      }
+    }
+    return results;
   }
 
   void applySuggestion(Suggestion s) {
@@ -191,7 +214,7 @@ class EditorModel extends ChangeNotifier {
 
   @override
   void dispose() {
-    _doc.removeListener(notifyListeners);
+    _doc.removeListener(_handleDocChanged);
     super.dispose();
   }
 

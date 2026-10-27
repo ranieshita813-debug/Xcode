@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
-import 'common.dart';
 
 class _Node {
   const _Node(this.name, this.depth,
