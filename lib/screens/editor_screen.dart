@@ -12,7 +12,6 @@ import '../widgets/code_view.dart';
 import '../widgets/command_palette.dart';
 import '../widgets/common.dart';
 import '../widgets/files_drawer.dart';
-import '../widgets/keyboard.dart';
 import '../widgets/terminal_panel.dart';
 import 'settings_screen.dart';
 import 'source_control_screen.dart';
@@ -45,6 +44,10 @@ class _EditorScreenState extends State<EditorScreen> {
   String? _paletteQuery; // non-null => palette open
   int _paletteSel = 0;
   BuildResult _build = const BuildResult(errors: []);
+
+  final List<String> _customFiles = [];
+  final List<String> _customFolders = [];
+  String _projectName = 'lattice-app';
 
   final _saveTimers = <String, Timer>{};
   final _listeners = <String, VoidCallback>{};
@@ -121,25 +124,6 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ---- input routing -----------------------------------------------------
 
-  void _onKey(String k) {
-    final m = _model;
-    if (m == null) return;
-    switch (k) {
-      case Keys.backspace:
-        m.backspace();
-      case Keys.enter:
-        m.newline();
-      case Keys.left:
-        m.moveHorizontal(-1);
-      case Keys.right:
-        m.moveHorizontal(1);
-      case Keys.tab:
-        m.insert('  ');
-      default:
-        m.insert(k);
-    }
-  }
-
   void _openPalette() => setState(() {
         _paletteQuery = '';
         _paletteSel = 0;
@@ -161,6 +145,206 @@ class _EditorScreenState extends State<EditorScreen> {
       case 'run':
         _run();
     }
+  }
+
+  // ---- project & file creation ------------------------------------------
+
+  Future<void> _promptNewFile() async {
+    final ctl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New File'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'e.g., utils.ts, main.dart, script.py',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctl.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    await _createNewFile(name);
+  }
+
+  Future<void> _createNewFile(String fileName, [String initialContent = '']) async {
+    try {
+      await _fileService.writeFile(fileName, initialContent);
+      final m = EditorModel(fileName: fileName, lines: initialContent.split('\n'));
+      _models[fileName] = m;
+      _watch(fileName, m);
+      setState(() {
+        if (!_customFiles.contains(fileName)) _customFiles.add(fileName);
+        if (!_openTabs.contains(fileName)) _openTabs.add(fileName);
+        _active = fileName;
+        _drawer = false;
+      });
+      _toast('Created $fileName');
+    } catch (_) {
+      _toast("Couldn't create $fileName");
+    }
+  }
+
+  Future<void> _promptNewFolder() async {
+    final ctl = TextEditingController();
+    final folderName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New Folder'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'e.g., utils, components, models',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctl.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (folderName == null || folderName.isEmpty) return;
+    setState(() {
+      if (!_customFolders.contains(folderName)) _customFolders.add(folderName);
+      _toast('Created folder $folderName');
+    });
+  }
+
+  Future<void> _promptNewProject() async {
+    final ctl = TextEditingController(text: 'my-project');
+    String selectedType = 'Dart / Flutter';
+    const types = [
+      'Dart / Flutter',
+      'TypeScript / React',
+      'Python',
+      'C++',
+      'Kotlin',
+      'Empty Workspace',
+    ];
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Create New Project'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctl,
+                decoration: const InputDecoration(labelText: 'Project Name'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: selectedType,
+                decoration: const InputDecoration(labelText: 'Project Template'),
+                items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                onChanged: (v) {
+                  if (v != null) setDialogState(() => selectedType = v);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Create Project')),
+          ],
+        ),
+      ),
+    );
+
+    if (ok != true) return;
+    final projName = ctl.text.trim().isEmpty ? 'my-project' : ctl.text.trim();
+    await _createNewProject(projName, selectedType);
+  }
+
+  Future<void> _createNewProject(String projName, String type) async {
+    final Map<String, String> templateFiles;
+    switch (type) {
+      case 'Dart / Flutter':
+        templateFiles = {
+          'main.dart': "import 'package:flutter/material.dart';\n\nvoid main() {\n  runApp(const MyApp());\n}\n",
+          'pubspec.yaml': 'name: $projName\ndescription: A new Flutter project.\nversion: 1.0.0+1\n',
+          'README.md': '# $projName\n\nCreated with Lattice Studio.',
+        };
+        break;
+      case 'TypeScript / React':
+        templateFiles = {
+          'App.tsx': "export default function App() {\n  return <h1>Hello from $projName</h1>;\n}\n",
+          'index.tsx': "import App from './App';\n",
+          'package.json': '{\n  "name": "$projName",\n  "version": "1.0.0"\n}\n',
+        };
+        break;
+      case 'Python':
+        templateFiles = {
+          'main.py': "def main():\n    print('Hello from $projName!')\n\nif __name__ == '__main__':\n    main()\n",
+          'requirements.txt': '# dependencies\n',
+          'README.md': '# $projName\n',
+        };
+        break;
+      case 'C++':
+        templateFiles = {
+          'main.cpp': "#include <iostream>\n\nint main() {\n    std::cout << \"Hello from $projName!\" << std::endl;\n    return 0;\n}\n",
+          'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.10)\nproject($projName)\nadd_executable($projName main.cpp)\n',
+        };
+        break;
+      case 'Kotlin':
+        templateFiles = {
+          'Main.kt': "fun main() {\n    println(\"Hello from $projName!\")\n}\n",
+          'build.gradle.kts': 'plugins {\n    kotlin("jvm") version "1.9.0"\n}\n',
+        };
+        break;
+      default:
+        templateFiles = {
+          'README.md': '# $projName\n',
+        };
+    }
+
+    for (final t in _saveTimers.values) {
+      t.cancel();
+    }
+    _saveTimers.clear();
+    _listeners.forEach((name, l) => _models[name]?.removeListener(l));
+    _listeners.clear();
+    _models.clear();
+    _openTabs.clear();
+    _customFiles.clear();
+    _customFolders.clear();
+
+    for (final e in templateFiles.entries) {
+      await _fileService.writeFile(e.key, e.value);
+      final m = EditorModel(fileName: e.key, lines: e.value.split('\n'));
+      _models[e.key] = m;
+      _watch(e.key, m);
+      _customFiles.add(e.key);
+      _openTabs.add(e.key);
+    }
+
+    setState(() {
+      _projectName = projName;
+      _active = templateFiles.keys.first;
+      _drawer = false;
+    });
+
+    _toast('Created project $projName');
   }
 
   // ---- actions -----------------------------------------------------------
@@ -344,7 +528,6 @@ class _EditorScreenState extends State<EditorScreen> {
                         result: _build,
                         onClose: () => setState(() => _terminal = false),
                       ),
-                    SafeArea(top: false, child: ExtraKeys(onKey: _onKey)),
                   ],
                 ),
                 // Left-edge swipe opens the drawer.
@@ -404,7 +587,13 @@ class _EditorScreenState extends State<EditorScreen> {
                     child: FilesDrawer(
                       activeFile: _active,
                       changeCount: 3,
+                      customFiles: _customFiles,
+                      customFolders: _customFolders,
+                      projectName: _projectName,
                       onOpenFile: _openFile,
+                      onNewFile: _promptNewFile,
+                      onNewFolder: _promptNewFolder,
+                      onNewProject: _promptNewProject,
                       onOpenSettings: () => _push(const SettingsScreen()),
                       onOpenSourceControl: () => _push(const SourceControlScreen()),
                     ),

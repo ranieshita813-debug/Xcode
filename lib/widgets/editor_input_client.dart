@@ -139,9 +139,11 @@ class EditorInputClient implements DeltaTextInputClient {
     final (row, col) = _offsetToRowCol(lines, selectionStart);
 
     if (hasTextChanges) {
-      const oldPosStart = TextPosition(0, 0);
-      final oldPosEnd = model.document.offsetToPosition(model.text.length);
-      model.document.replaceRange(oldPosStart, oldPosEnd, newText);
+      if (model.text != newText) {
+        const oldStart = TextPosition(0, 0);
+        final oldEnd = model.document.offsetToPosition(model.text.length);
+        model.document.replaceRange(oldStart, oldEnd, newText);
+      }
       model.document.cursorPosition = TextPosition(row, col);
       model.dirty = true;
     } else {

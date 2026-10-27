@@ -100,6 +100,7 @@ class _CodeViewState extends State<CodeView> {
   final Map<int, List<int>> _scopeCache = {};
 
   (TextPosition, TextPosition)? _bracket;
+  LspDiagnostic? _activeDiagnosticTooltip;
 
   // Find / replace state
   bool _findOpen = false, _caseSens = false, _replaceOpen = false;
@@ -560,7 +561,7 @@ class _CodeViewState extends State<CodeView> {
     if (!_hasSelection) return;
     final (s, e) = _norm();
     await _copySelection();
-    widget.model.document.deleteRange(s, e);
+    widget.model.deleteSelection(s, e);
     _clearSelection();
   }
 
@@ -570,11 +571,72 @@ class _CodeViewState extends State<CodeView> {
     if (text == null) return;
     if (_hasSelection) {
       final (s, e) = _norm();
-      widget.model.document.replaceRange(s, e, text);
+      widget.model.replaceSelection(s, e, text);
       _clearSelection();
     } else {
       widget.model.insert(text);
     }
+  }
+
+  void _handleBackspace() {
+    if (_hasSelection) {
+      final (s, e) = _norm();
+      widget.model.deleteSelection(s, e);
+      _clearSelection();
+    } else {
+      widget.model.backspace();
+    }
+  }
+
+  void _handleKeyInsert(String text) {
+    if (_hasSelection) {
+      final (s, e) = _norm();
+      widget.model.replaceSelection(s, e, text);
+      _clearSelection();
+    } else {
+      widget.model.insert(text);
+    }
+  }
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.backspace) {
+      _handleBackspace();
+      return KeyEventResult.handled;
+    } else if (key == LogicalKeyboardKey.delete) {
+      if (_hasSelection) {
+        _handleBackspace();
+      } else {
+        final m = widget.model;
+        if (m.col < m.lines[m.row].length) {
+          m.document.deleteRange(TextPosition(m.row, m.col), TextPosition(m.row, m.col + 1));
+        } else if (m.row < m.lines.length - 1) {
+          m.document.deleteRange(TextPosition(m.row, m.col), TextPosition(m.row + 1, 0));
+        }
+      }
+      return KeyEventResult.handled;
+    } else if (key == LogicalKeyboardKey.enter) {
+      if (_hasSelection) {
+        final (s, e) = _norm();
+        widget.model.replaceSelection(s, e, '\n');
+        _clearSelection();
+      } else {
+        widget.model.newline();
+      }
+      return KeyEventResult.handled;
+    } else if (key == LogicalKeyboardKey.tab) {
+      _handleKeyInsert('  ');
+      return KeyEventResult.handled;
+    }
+    final char = event.character;
+    if (char != null && char.isNotEmpty && char.codeUnitAt(0) >= 32) {
+      _handleKeyInsert(char);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _selectAll() {
@@ -721,48 +783,50 @@ class _CodeViewState extends State<CodeView> {
       _lastViewportH = box.maxHeight;
       final contentW = max(_viewport.width, _codeLeft + (_longest + 6) * charW);
 
-      final editor = GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapUp: _onTapUp,
-        onLongPressStart: _onLongPressStart,
-        onLongPressMoveUpdate: _onLongPressMove,
-        onLongPressEnd: (_) => setState(() => _magnifierPos = null),
-        // Pin text scaling: charW is measured unscaled, so glyphs must be too.
-        child: MediaQuery.withNoTextScaling(
-          child: ColoredBox(
-            color: c.bg,
-            child: Scrollbar(
-              controller: _h,
-              notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
-              scrollbarOrientation: ScrollbarOrientation.bottom,
+      final editor = Focus(
+        autofocus: true,
+        onKeyEvent: _onKeyEvent,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: _onTapUp,
+          onLongPressStart: _onLongPressStart,
+          onLongPressMoveUpdate: _onLongPressMove,
+          onLongPressEnd: (_) => setState(() => _magnifierPos = null),
+          child: MediaQuery.withNoTextScaling(
+            child: ColoredBox(
+              color: c.bg,
               child: Scrollbar(
-                controller: _v,
-                notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
-                child: SingleChildScrollView(
-                  controller: _h,
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: contentW,
-                    height: box.maxHeight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: CodeView._topPad),
-                      child: ListView.builder(
-                        controller: _v,
-                        itemCount: _count,
-                        itemExtent: lineH,
-                        // scroll past the last line, like desktop editors
-                        padding: EdgeInsets.only(bottom: box.maxHeight * 0.4),
-                        itemBuilder: (context, vIndex) => _buildRow(
-                          context,
-                          _rowAt(vIndex),
-                          c,
-                          s,
-                          baseStyle,
-                          gutterW,
-                          lineH,
-                          charW,
-                          selection,
-                          activeGuide,
+                controller: _h,
+                notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
+                scrollbarOrientation: ScrollbarOrientation.bottom,
+                child: Scrollbar(
+                  controller: _v,
+                  notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
+                  child: SingleChildScrollView(
+                    controller: _h,
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: contentW,
+                      height: box.maxHeight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: CodeView._topPad),
+                        child: ListView.builder(
+                          controller: _v,
+                          itemCount: _count,
+                          itemExtent: lineH,
+                          padding: EdgeInsets.only(bottom: box.maxHeight * 0.4),
+                          itemBuilder: (context, vIndex) => _buildRow(
+                            context,
+                            _rowAt(vIndex),
+                            c,
+                            s,
+                            baseStyle,
+                            gutterW,
+                            lineH,
+                            charW,
+                            selection,
+                            activeGuide,
+                          ),
                         ),
                       ),
                     ),
@@ -936,10 +1000,17 @@ class _CodeViewState extends State<CodeView> {
                   Positioned(
                     left: diag.col * charW,
                     bottom: 0,
-                    width: max(charW * 3, 20.0),
-                    height: 2,
-                    child: Container(
-                      color: diag.severity == DiagnosticSeverity.error ? c.error : c.warning,
+                    width: max(charW * 4, 24.0),
+                    height: 4,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _activeDiagnosticTooltip = diag),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: diag.severity == DiagnosticSeverity.error ? c.error : c.warning,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
                     ),
                   ),
                 for (final bc in bracketCols)
@@ -1203,6 +1274,49 @@ class _CodeViewState extends State<CodeView> {
           fontFamily: s.fontFamily,
         ),
       ));
+    }
+
+    if (_activeDiagnosticTooltip != null) {
+      final diag = _activeDiagnosticTooltip!;
+      children.add(
+        Positioned(
+          top: (_yOfRow(diag.line) - 48).clamp(8.0, max(8.0, _viewport.height - 80)),
+          left: (_xOfCol(diag.col)).clamp(12.0, max(12.0, _viewport.width - 320)),
+          child: Material(
+            color: c.raised,
+            borderRadius: BorderRadius.circular(8),
+            elevation: 8,
+            child: Container(
+              width: min(300.0, _viewport.width - 24),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: diag.severity == DiagnosticSeverity.error ? c.error : c.warning),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    diag.severity == DiagnosticSeverity.error ? Icons.error_outline : Icons.warning_amber_rounded,
+                    color: diag.severity == DiagnosticSeverity.error ? c.error : c.warning,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${diag.source}: ${diag.message}',
+                      style: LatticeText.ui(12, color: c.text),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => setState(() => _activeDiagnosticTooltip = null),
+                    child: Icon(Icons.close, size: 16, color: c.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     if (_magnifierPos != null) {

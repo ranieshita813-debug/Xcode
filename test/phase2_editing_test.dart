@@ -78,5 +78,26 @@ void main() {
       model.undo();
       expect(model.text, equals('hello'));
     });
+
+    test('backspace handles auto-pairs, selection, and soft tabs', () {
+      // Auto-pair backspace
+      final model = EditorModel(lines: ['']);
+      model.insert('(');
+      expect(model.text, equals('()'));
+      expect(model.col, equals(1));
+      model.backspace();
+      expect(model.text, equals(''));
+
+      // Selection deletion
+      final model2 = EditorModel(lines: ['hello world']);
+      model2.backspace(selStart: const TextPosition(0, 5), selEnd: const TextPosition(0, 11));
+      expect(model2.text, equals('hello'));
+
+      // Soft tab backspace (2 spaces)
+      final model3 = EditorModel(lines: ['  code']);
+      model3.moveTo(0, 2);
+      model3.backspace();
+      expect(model3.text, equals('code'));
+    });
   });
 }
