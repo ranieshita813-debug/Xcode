@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/document.dart';
 import '../models/editor_model.dart';
 import '../models/folding_model.dart';
+import '../services/lsp_service.dart';
 import '../models/highlighter.dart';
 import '../state/settings.dart';
 import '../theme/tokens.dart';
@@ -860,6 +861,7 @@ class _CodeViewState extends State<CodeView> {
       if (_bracket != null && _bracket!.$1.row == index) _bracket!.$1.col,
       if (_bracket != null && _bracket!.$2.row == index) _bracket!.$2.col,
     ];
+    final lineDiagnostics = model.diagnostics.where((d) => d.line == index).toList();
 
     // Selection rectangle for this row (none for a zero-width tail at col 0).
     double? selLeft, selWidth;
@@ -928,6 +930,16 @@ class _CodeViewState extends State<CodeView> {
                             ? Border.all(color: c.warning)
                             : null,
                       ),
+                    ),
+                  ),
+                for (final diag in lineDiagnostics)
+                  Positioned(
+                    left: diag.col * charW,
+                    bottom: 0,
+                    width: max(charW * 3, 20.0),
+                    height: 2,
+                    child: Container(
+                      color: diag.severity == DiagnosticSeverity.error ? c.error : c.warning,
                     ),
                   ),
                 for (final bc in bracketCols)
@@ -1025,7 +1037,9 @@ class _CodeViewState extends State<CodeView> {
                             '${index + 1}',
                             style: LatticeText.mono(
                               s.fontSize,
-                              color: isCurrent ? c.text : c.textFaint,
+                              color: lineDiagnostics.isNotEmpty
+                                  ? c.error
+                                  : (isCurrent ? c.text : c.textFaint),
                               fontFamily: s.fontFamily,
                             ),
                           ),

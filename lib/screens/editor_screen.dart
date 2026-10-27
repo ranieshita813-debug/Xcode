@@ -168,15 +168,23 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _run() async {
     final m = _model;
     if (m == null) return;
-    final lines = m.text.split('\n');
     final errors = <String>[];
-    for (var i = 0; i < lines.length; i++) {
-      final hit = RegExp(r'(?<![\w$])setD(?![\w$])').firstMatch(lines[i]);
-      if (hit != null) {
-        errors.add(
-            "$_active:${i + 1}:${hit.start + 1} - error TS2304: Cannot find name 'setD'.");
+
+    for (final diag in m.diagnostics) {
+      errors.add(diag.format());
+    }
+
+    if (errors.isEmpty) {
+      final lines = m.text.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        final hit = RegExp(r'(?<![\w$])setD(?![\w$])').firstMatch(lines[i]);
+        if (hit != null) {
+          errors.add(
+              "$_active:${i + 1}:${hit.start + 1} - error TS2304: Cannot find name 'setD'.");
+        }
       }
     }
+
     setState(() {
       _build = BuildResult(errors: errors);
       _terminal = true;
