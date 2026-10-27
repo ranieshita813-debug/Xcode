@@ -33,15 +33,29 @@ int rowColToOffset(List<String> lines, int row, int col) {
 }
 
 /// Virtualized code view.
-/// Fixes vs. previous version:
-///  - gutter + git bar stay pinned while scrolling horizontally
-///  - folding-aware caret, selection, handles, taps (visual index mapping)
-///  - selection/caret painted per row (virtualized, no stale offsets)
-///  - per-keystroke O(n) work cached; scroll no longer rebuilds the whole tree
-///  - caret auto-scrolls into view
-///  - 44dp handle hit targets, handle drag uses correct local coordinates
-///  - toolbar / autocomplete / magnifier clamp to the viewport (flip when needed)
-///  - dynamic gutter width, double-tap word select, fold chip, scrollbar
+///
+/// Fixes in this version:
+///  - swapping [EditorModel] / [FoldingModel] now rebuilds the input client
+///    (typing used to go to the previous document after a tab switch)
+///  - selection is validated against the document and dropped when the text
+///    changes (stale ranges could throw RangeError in copy / cut)
+///  - taps are handled on tap-UP, so starting a scroll no longer moves the
+///    caret or pops the keyboard; double-tap is detected without delaying taps
+///  - handle drag uses a fixed anchor, so dragging one handle past the other works
+///  - char width is measured from the real font (and text scaling is pinned),
+///    so caret / selection / taps line up with the glyphs
+///  - sticky-scope lookups are cached (they used to rescan up to 3000 lines on
+///    every scroll frame) and the caret is kept out from under the sticky header
+///  - caret is re-revealed when the keyboard shrinks the viewport
+///  - autocomplete no longer throws when a label is shorter than the prefix
+///  - selection handles hide when scrolled out of view, no 1-char stub at col 0
+///
+/// New:
+///  - find & replace (replace one / replace all)
+///  - tap the line-number gutter to select a line
+///  - tap "Ln, Col" in the status bar to jump to a line
+///  - horizontal scrollbar, scroll-past-end, anchored long-press word-drag
+///  - status bar picks a readable foreground for any accent colour
 class CodeView extends StatefulWidget {
   const CodeView({super.key, required this.model, this.foldingModel});
   final EditorModel model;
@@ -56,31 +70,162 @@ class CodeView extends StatefulWidget {
 }
 
 class _CodeViewState extends State<CodeView> {
-  late final EditorInputClient _inputClient;
-  late final FoldingModel _folding;
+  late EditorInputClient _inputClient;
+  late FoldingModel _folding;
   final _v = ScrollController();
   final _h = ScrollController();
   final _stackKey = GlobalKey();
 
+  static final _wsRe = RegExp(r'^\s*');
+  static final _wordRe = RegExp(r'[\w$]');
+
   TextPosition? _selectionStart;
   TextPosition? _selectionEnd;
+  TextPosition? _dragAnchor; // fixed end while a handle is dragged
+  TextPosition _wordStart = const TextPosition(0, 0);
+  TextPosition _wordEnd = const TextPosition(0, 0);
   Offset? _magnifierPos;
-  Offset _doubleTapAt = Offset.zero;
+
+  // Manual double-tap detection (keeps single taps instant).
+  DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Offset _lastTapPos = Offset.zero;
 
   // Cached layout data (recomputed on model/fold change only).
   late var _regions = _folding.calculateFoldRegions(widget.model.document);
   Set<int> _foldStarts = {};
   List<int>? _visible; // null => identity mapping (nothing folded)
   int _longest = 0;
+  int _docSig = 0;
+  final Map<int, List<int>> _scopeCache = {};
 
   (TextPosition, TextPosition)? _bracket;
 
-  // Find state
-  bool _findOpen = false, _caseSens = false;
+  // Find / replace state
+  bool _findOpen = false, _caseSens = false, _replaceOpen = false;
   final _findCtl = TextEditingController();
+  final _replCtl = TextEditingController();
   List<(int, int)> _matches = [];
   Map<int, List<int>> _matchByRow = {};
   int _matchIdx = -1;
+
+  // Metrics captured in build for gesture math.
+  double _lineH = 20, _charW = 8, _codeLeft = 56;
+  Size _viewport = Size.zero;
+  double? _lastViewportH;
+
+  EditorInputClient _makeClient() => EditorInputClient(
+        model: widget.model,
+        onEditingChanged: () {
+          if (mounted) setState(() {});
+        },
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    _folding = widget.foldingModel ?? FoldingModel();
+    _inputClient = _makeClient();
+    widget.model.addListener(_onModelChanged);
+    _folding.addListener(_onFoldChanged);
+    _recompute();
+  }
+
+  @override
+  void didUpdateWidget(CodeView old) {
+    super.didUpdateWidget(old);
+    var changed = false;
+    if (old.foldingModel != widget.foldingModel) {
+      _folding.removeListener(_onFoldChanged);
+      _folding = widget.foldingModel ?? FoldingModel();
+      _folding.addListener(_onFoldChanged);
+      changed = true;
+    }
+    if (old.model != widget.model) {
+      old.model.removeListener(_onModelChanged);
+      widget.model.addListener(_onModelChanged);
+      _inputClient.detach();
+      _inputClient = _makeClient(); // was bound to the old document
+      _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
+      _matches = [];
+      _matchByRow = {};
+      _matchIdx = -1;
+      if (_v.hasClients) _v.jumpTo(0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_h.hasClients) _h.jumpTo(0);
+        _ensureCaretVisible();
+      });
+      changed = true;
+    }
+    if (changed) _recompute();
+  }
+
+  @override
+  void dispose() {
+    widget.model.removeListener(_onModelChanged);
+    _folding.removeListener(_onFoldChanged);
+    _inputClient.detach();
+    _v.dispose();
+    _h.dispose();
+    _findCtl.dispose();
+    _replCtl.dispose();
+    super.dispose();
+  }
+
+  // ---- cached layout ------------------------------------------------------
+
+  void _recompute() {
+    final lines = widget.model.lines;
+    _regions = _folding.calculateFoldRegions(widget.model.document);
+    _foldStarts = {for (final r in _regions) r.startLine};
+    final anyFolded = _foldStarts.any(_folding.isLineFolded);
+    _visible = anyFolded
+        ? [
+            for (var i = 0; i < lines.length; i++)
+              if (!_folding.isLineHidden(i, _regions)) i
+          ]
+        : null;
+    _longest = lines.fold<int>(0, (m, l) => l.length > m ? l.length : m);
+    _scopeCache.clear();
+    _docSig = Object.hashAll(lines);
+    if (_findOpen) _computeMatches();
+  }
+
+  int get _count => _visible?.length ?? widget.model.lines.length;
+  int _rowAt(int v) => _visible?[v] ?? v;
+  int _vIndexOf(int row) {
+    final vis = _visible;
+    if (vis == null) return row;
+    if (vis.isEmpty) return 0;
+    var lo = 0, hi = vis.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (vis[mid] < row) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  void _onModelChanged() {
+    if (!mounted) return;
+    final textChanged = Object.hashAll(widget.model.lines) != _docSig;
+    setState(() {
+      _recompute();
+      // A selection only makes sense for the text it was made on.
+      if (textChanged) {
+        _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureCaretVisible());
+  }
+
+  void _onFoldChanged() {
+    if (mounted) setState(_recompute);
+  }
+
+  // ---- find & replace -----------------------------------------------------
 
   void _computeMatches() {
     final q = _findCtl.text;
@@ -124,16 +269,35 @@ class _CodeViewState extends State<CodeView> {
 
   void _goToMatch() {
     if (_matchIdx < 0 || _matchIdx >= _matches.length) return;
-    final (r, c) = _matches[_matchIdx];
-    _inputClient.updateModelSelection(r, c);
-    if (_v.hasClients) {
-      final top = _vIndexOf(r) * _lineH;
-      final p = _v.position;
-      if (top < p.pixels + _lineH * 3 ||
-          top > p.pixels + p.viewportDimension - _lineH * 3) {
-        _v.jumpTo((top - p.viewportDimension / 2).clamp(0.0, p.maxScrollExtent));
-      }
+    final (r, col) = _matches[_matchIdx];
+    if (_hasSelection) {
+      setState(() => _selectionStart = _selectionEnd = null);
     }
+    _inputClient.updateModelSelection(r, col);
+    _centerRow(r);
+  }
+
+  void _replaceCurrent() {
+    if (_matchIdx < 0 || _matchIdx >= _matches.length) return;
+    final (r, col) = _matches[_matchIdx];
+    final len = _findCtl.text.length;
+    widget.model.document
+        .replaceRange(TextPosition(r, col), TextPosition(r, col + len), _replCtl.text);
+    setState(_computeMatches);
+    _goToMatch();
+    HapticFeedback.selectionClick();
+  }
+
+  void _replaceAll() {
+    if (_matches.isEmpty) return;
+    final len = _findCtl.text.length;
+    final doc = widget.model.document;
+    // Back to front so earlier positions stay valid.
+    for (final (r, col) in _matches.reversed) {
+      doc.replaceRange(TextPosition(r, col), TextPosition(r, col + len), _replCtl.text);
+    }
+    setState(_computeMatches);
+    HapticFeedback.mediumImpact();
   }
 
   void _toggleFind() {
@@ -148,18 +312,66 @@ class _CodeViewState extends State<CodeView> {
       } else {
         _matches = [];
         _matchByRow = {};
+        _replaceOpen = false;
       }
     });
   }
 
-  /// Enclosing indentation scopes of [row], outermost first.
-  List<int> _scopes(int row, {int max = 3}) {
+  // ---- go to line ---------------------------------------------------------
+
+  Future<void> _goToLine() async {
+    final c = context.c;
+    final total = widget.model.lines.length;
+    final ctl = TextEditingController(text: '${widget.model.row + 1}');
+    ctl.selection = TextSelection(baseOffset: 0, extentOffset: ctl.text.length);
+    final res = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.raised,
+        title: Text('Go to line',
+            style: LatticeText.ui(16, weight: FontWeight.w600, color: c.text)),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          style: LatticeText.mono(15, color: c.text),
+          cursorColor: c.accent,
+          decoration: InputDecoration(
+            hintText: '1 – $total',
+            hintStyle: LatticeText.mono(15, color: c.textFaint),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Cancel', style: LatticeText.ui(14, color: c.textMuted))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, int.tryParse(ctl.text)),
+              child: Text('Go',
+                  style: LatticeText.ui(14, weight: FontWeight.w600, color: c.accent))),
+        ],
+      ),
+    );
+    if (res == null || !mounted || total == 0) return;
+    final r = (res - 1).clamp(0, total - 1);
+    setState(() => _selectionStart = _selectionEnd = null);
+    _inputClient.updateModelSelection(r, 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _centerRow(r, force: true));
+  }
+
+  // ---- scopes / brackets --------------------------------------------------
+
+  /// Enclosing indentation scopes of [row], outermost first (cached).
+  List<int> _scopes(int row) {
+    final cached = _scopeCache[row];
+    if (cached != null) return cached;
     final lines = widget.model.lines;
-    if (row < 0 || row >= lines.length) return [];
+    if (row < 0 || row >= lines.length) return const [];
     int ind(String l) => l.length - l.trimLeft().length;
     var cur = lines[row].trim().isEmpty ? 1 << 30 : ind(lines[row]);
     final out = <int>[];
-    for (var r = row - 1; r >= 0 && row - r < 3000 && out.length < max; r--) {
+    for (var r = row - 1; r >= 0 && row - r < 3000 && out.length < 3; r--) {
       final l = lines[r];
       if (l.trim().isEmpty) continue;
       final i = ind(l);
@@ -169,7 +381,7 @@ class _CodeViewState extends State<CodeView> {
         if (i == 0) break;
       }
     }
-    return out.reversed.toList();
+    return _scopeCache[row] = out.reversed.toList();
   }
 
   String _scopeLabel(int row) {
@@ -213,90 +425,6 @@ class _CodeViewState extends State<CodeView> {
     return null;
   }
 
-  // Metrics captured in build for gesture math.
-  double _lineH = 20, _charW = 8, _codeLeft = 56;
-  Size _viewport = Size.zero;
-
-  @override
-  void initState() {
-    super.initState();
-    _folding = widget.foldingModel ?? FoldingModel();
-    _inputClient = EditorInputClient(
-      model: widget.model,
-      onEditingChanged: () => setState(() {}),
-    );
-    widget.model.addListener(_onModelChanged);
-    _folding.addListener(_onFoldChanged);
-    _recompute();
-  }
-
-  @override
-  void didUpdateWidget(CodeView old) {
-    super.didUpdateWidget(old);
-    if (old.model != widget.model) {
-      old.model.removeListener(_onModelChanged);
-      widget.model.addListener(_onModelChanged);
-      _inputClient.detach();
-      _selectionStart = _selectionEnd = _magnifierPos = null;
-      _recompute();
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.model.removeListener(_onModelChanged);
-    _folding.removeListener(_onFoldChanged);
-    _inputClient.detach();
-    _v.dispose();
-    _h.dispose();
-    _findCtl.dispose();
-    super.dispose();
-  }
-
-  // ---- cached layout ------------------------------------------------------
-
-  void _recompute() {
-    final lines = widget.model.lines;
-    _regions = _folding.calculateFoldRegions(widget.model.document);
-    _foldStarts = {for (final r in _regions) r.startLine};
-    final anyFolded = _foldStarts.any(_folding.isLineFolded);
-    _visible = anyFolded
-        ? [
-            for (var i = 0; i < lines.length; i++)
-              if (!_folding.isLineHidden(i, _regions)) i
-          ]
-        : null;
-    _longest = lines.fold<int>(0, (m, l) => l.length > m ? l.length : m);
-    if (_findOpen) _computeMatches();
-  }
-
-  int get _count => _visible?.length ?? widget.model.lines.length;
-  int _rowAt(int v) => _visible?[v] ?? v;
-  int _vIndexOf(int row) {
-    final vis = _visible;
-    if (vis == null) return row;
-    var lo = 0, hi = vis.length - 1;
-    while (lo < hi) {
-      final mid = (lo + hi) >> 1;
-      if (vis[mid] < row) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
-    }
-    return lo;
-  }
-
-  void _onModelChanged() {
-    if (!mounted) return;
-    setState(_recompute);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureCaretVisible());
-  }
-
-  void _onFoldChanged() {
-    if (mounted) setState(_recompute);
-  }
-
   // ---- geometry -----------------------------------------------------------
 
   double get _vOff => _v.hasClients ? _v.offset : 0;
@@ -318,13 +446,38 @@ class _CodeViewState extends State<CodeView> {
   Offset _globalToLocal(Offset g) =>
       (_stackKey.currentContext!.findRenderObject() as RenderBox).globalToLocal(g);
 
+  double _measureCharW(TextStyle style, double fs) {
+    final tp = TextPainter(
+      text: TextSpan(text: 'M' * 16, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.noScaling,
+      maxLines: 1,
+    )..layout();
+    final w = tp.width / 16;
+    tp.dispose();
+    return w > 0 ? w : fs * 0.6;
+  }
+
+  void _centerRow(int row, {bool force = false}) {
+    if (!_v.hasClients) return;
+    final p = _v.position;
+    final top = _vIndexOf(row) * _lineH;
+    if (force ||
+        top < p.pixels + _lineH * 3 ||
+        top > p.pixels + p.viewportDimension - _lineH * 3) {
+      _v.jumpTo((top - p.viewportDimension / 2).clamp(0.0, p.maxScrollExtent));
+    }
+  }
+
   void _ensureCaretVisible() {
     if (!mounted || !_v.hasClients || !_h.hasClients) return;
     final m = widget.model;
     final top = _vIndexOf(m.row) * _lineH;
     final vp = _v.position;
-    if (top < vp.pixels) {
-      _v.jumpTo(top.clamp(0.0, vp.maxScrollExtent));
+    // Keep the caret below the sticky scope header (one line per stuck scope).
+    final stickyH = _scopes(m.row).length * _lineH;
+    if (top - stickyH < vp.pixels) {
+      _v.jumpTo((top - stickyH).clamp(0.0, vp.maxScrollExtent));
     } else if (top + _lineH > vp.pixels + vp.viewportDimension) {
       _v.jumpTo((top + _lineH - vp.viewportDimension).clamp(0.0, vp.maxScrollExtent));
     }
@@ -339,34 +492,48 @@ class _CodeViewState extends State<CodeView> {
 
   // ---- selection & clipboard ---------------------------------------------
 
+  TextPosition _clampPos(TextPosition p) {
+    final lines = widget.model.lines;
+    if (lines.isEmpty) return const TextPosition(0, 0);
+    final r = p.row.clamp(0, lines.length - 1);
+    return TextPosition(r, p.col.clamp(0, lines[r].length));
+  }
+
   bool get _hasSelection =>
       _selectionStart != null && _selectionEnd != null && _selectionStart != _selectionEnd;
 
   (TextPosition, TextPosition) _norm() {
-    final a = _selectionStart ?? const TextPosition(0, 0);
-    final b = _selectionEnd ?? const TextPosition(0, 0);
+    final a = _clampPos(_selectionStart ?? const TextPosition(0, 0));
+    final b = _clampPos(_selectionEnd ?? const TextPosition(0, 0));
     final swap = a.row > b.row || (a.row == b.row && a.col > b.col);
     return swap ? (b, a) : (a, b);
   }
 
   void _clearSelection() => setState(() {
-        _selectionStart = _selectionEnd = _magnifierPos = null;
+        _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
       });
 
   void _selectWordAt(int row, int col) {
     final line = widget.model.lines[row];
     var start = col.clamp(0, line.length);
     var end = start;
-    final w = RegExp(r'[\w$]');
-    while (start > 0 && w.hasMatch(line[start - 1])) {
+    while (start > 0 && _wordRe.hasMatch(line[start - 1])) {
       start--;
     }
-    while (end < line.length && w.hasMatch(line[end])) {
+    while (end < line.length && _wordRe.hasMatch(line[end])) {
       end++;
     }
     setState(() {
       _selectionStart = TextPosition(row, start);
       _selectionEnd = TextPosition(row, end);
+    });
+  }
+
+  void _selectLine(int row) {
+    final len = widget.model.lines[row].length;
+    setState(() {
+      _selectionStart = TextPosition(row, 0);
+      _selectionEnd = TextPosition(row, len);
     });
   }
 
@@ -418,23 +585,86 @@ class _CodeViewState extends State<CodeView> {
     });
   }
 
+  // ---- gestures -----------------------------------------------------------
+
+  void _onTapUp(TapUpDetails d) {
+    _inputClient.attach();
+    final now = DateTime.now();
+    final isDouble = now.difference(_lastTapAt) < const Duration(milliseconds: 300) &&
+        (d.localPosition - _lastTapPos).distance < 24;
+    _lastTapAt = isDouble ? DateTime.fromMillisecondsSinceEpoch(0) : now;
+    _lastTapPos = d.localPosition;
+
+    if (_count == 0) return;
+    final p = _posFromLocal(d.localPosition);
+
+    // Gutter: tap a line number to select the whole line.
+    if (d.localPosition.dx < _codeLeft - 8) {
+      _selectLine(p.row);
+      HapticFeedback.selectionClick();
+      return;
+    }
+    if (isDouble) {
+      _selectWordAt(p.row, p.col);
+      HapticFeedback.selectionClick();
+      return;
+    }
+    if (_hasSelection) {
+      _clearSelection();
+      return;
+    }
+    _inputClient.updateModelSelection(p.row, p.col);
+  }
+
+  void _onLongPressStart(LongPressStartDetails d) {
+    if (_count == 0) return;
+    final p = _posFromLocal(d.localPosition);
+    _selectWordAt(p.row, p.col);
+    final (s, e) = _norm();
+    _wordStart = s;
+    _wordEnd = e;
+    HapticFeedback.mediumImpact();
+    setState(() => _magnifierPos = d.localPosition);
+  }
+
+  void _onLongPressMove(LongPressMoveUpdateDetails d) {
+    if (_count == 0) return;
+    final pos = _posFromLocal(d.localPosition);
+    final before = pos.row < _wordStart.row ||
+        (pos.row == _wordStart.row && pos.col < _wordStart.col);
+    setState(() {
+      // Extend from the originally selected word in either direction.
+      if (before) {
+        _selectionStart = pos;
+        _selectionEnd = _wordEnd;
+      } else {
+        _selectionStart = _wordStart;
+        _selectionEnd = pos;
+      }
+      _magnifierPos = d.localPosition;
+    });
+  }
+
   // ---- build --------------------------------------------------------------
 
   static const _langs = {
-    'dart': 'Dart', 'js': 'JavaScript', 'ts': 'TypeScript', 'py': 'Python',
-    'json': 'JSON', 'md': 'Markdown', 'html': 'HTML', 'css': 'CSS',
+    'dart': 'Dart', 'js': 'JavaScript', 'ts': 'TypeScript', 'tsx': 'TypeScript React',
+    'py': 'Python', 'json': 'JSON', 'md': 'Markdown', 'html': 'HTML', 'css': 'CSS',
     'kt': 'Kotlin', 'java': 'Java', 'go': 'Go', 'rs': 'Rust', 'yaml': 'YAML',
+    'cpp': 'C++',
   };
 
   @override
   Widget build(BuildContext context) {
     final m = widget.model;
-    final (ns, ne) = _norm();
     final sel = !_hasSelection
         ? ''
-        : ns.row == ne.row
-            ? ' (${ne.col - ns.col} selected)'
-            : ' (${ne.row - ns.row + 1} lines selected)';
+        : () {
+            final (ns, ne) = _norm();
+            return ns.row == ne.row
+                ? ' (${ne.col - ns.col} selected)'
+                : ' (${ne.row - ns.row + 1} lines selected)';
+          }();
     final name = m.fileName;
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return Column(
@@ -449,6 +679,7 @@ class _CodeViewState extends State<CodeView> {
         _StatusBar(
           left: 'Ln ${m.row + 1}, Col ${m.col + 1}$sel',
           right: 'Spaces: 2   UTF-8   LF   ${_langs[ext] ?? 'Plain Text'}',
+          onTapLeft: _goToLine,
         ),
       ],
     );
@@ -459,7 +690,13 @@ class _CodeViewState extends State<CodeView> {
     final s = SettingsScope.of(context);
     final fs = s.fontSize;
     final lineH = fs * 22 / 12;
-    final charW = fs * 0.6;
+    final baseStyle = LatticeText.mono(
+      fs,
+      color: c.synPlain,
+      height: lineH / fs,
+      fontFamily: s.fontFamily,
+    );
+    final charW = _measureCharW(baseStyle, fs);
     final lines = widget.model.lines;
     final digits = max(3, lines.length.toString().length);
     final gutterW = max(48.0, digits * charW + 36);
@@ -468,65 +705,66 @@ class _CodeViewState extends State<CodeView> {
     _codeLeft = gutterW + 8;
     _bracket = _hasSelection ? null : _findBracketPair();
 
-    final baseStyle = LatticeText.mono(
-      fs,
-      color: c.synPlain,
-      height: lineH / fs,
-      fontFamily: s.fontFamily,
-    );
+    final selection = _hasSelection ? _norm() : null;
+    final caretRow = widget.model.row;
+    final caretLeading =
+        caretRow < lines.length ? (_wsRe.stringMatch(lines[caretRow])?.length ?? 0) : 0;
+    final activeGuide = max(0, caretLeading ~/ CodeView._indentUnit.toInt() - 1);
 
     return LayoutBuilder(builder: (context, box) {
       _viewport = box.biggest;
+      // Keyboard opened: keep the caret in view.
+      if (_lastViewportH != null && box.maxHeight < _lastViewportH! - 40) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _ensureCaretVisible());
+      }
+      _lastViewportH = box.maxHeight;
       final contentW = max(_viewport.width, _codeLeft + (_longest + 6) * charW);
 
       final editor = GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapDown: (d) {
-          _inputClient.attach();
-          if (_hasSelection) {
-            _clearSelection();
-            return;
-          }
-          if (d.localPosition.dx < _codeLeft - 8) return; // gutter taps don't move caret
-          final p = _posFromLocal(d.localPosition);
-          _inputClient.updateModelSelection(p.row, p.col);
-        },
-        onDoubleTapDown: (d) => _doubleTapAt = d.localPosition,
-        onDoubleTap: () {
-          final p = _posFromLocal(_doubleTapAt);
-          _selectWordAt(p.row, p.col);
-          HapticFeedback.selectionClick();
-        },
-        onLongPressStart: (d) {
-          final p = _posFromLocal(d.localPosition);
-          _selectWordAt(p.row, p.col);
-          HapticFeedback.mediumImpact();
-          setState(() => _magnifierPos = d.localPosition);
-        },
-        onLongPressMoveUpdate: (d) => setState(() {
-          _selectionEnd = _posFromLocal(d.localPosition);
-          _magnifierPos = d.localPosition;
-        }),
+        onTapUp: _onTapUp,
+        onLongPressStart: _onLongPressStart,
+        onLongPressMoveUpdate: _onLongPressMove,
         onLongPressEnd: (_) => setState(() => _magnifierPos = null),
-        child: ColoredBox(
-          color: c.bg,
-          child: Scrollbar(
-            controller: _v,
-            notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
-            child: SingleChildScrollView(
+        // Pin text scaling: charW is measured unscaled, so glyphs must be too.
+        child: MediaQuery.withNoTextScaling(
+          child: ColoredBox(
+            color: c.bg,
+            child: Scrollbar(
               controller: _h,
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: contentW,
-                height: box.maxHeight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: CodeView._topPad),
-                  child: ListView.builder(
-                    controller: _v,
-                    itemCount: _count,
-                    itemExtent: lineH,
-                    itemBuilder: (context, vIndex) => _buildRow(
-                        context, _rowAt(vIndex), c, s, baseStyle, gutterW, lineH, charW),
+              notificationPredicate: (n) => n.metrics.axis == Axis.horizontal,
+              scrollbarOrientation: ScrollbarOrientation.bottom,
+              child: Scrollbar(
+                controller: _v,
+                notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
+                child: SingleChildScrollView(
+                  controller: _h,
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: contentW,
+                    height: box.maxHeight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: CodeView._topPad),
+                      child: ListView.builder(
+                        controller: _v,
+                        itemCount: _count,
+                        itemExtent: lineH,
+                        // scroll past the last line, like desktop editors
+                        padding: EdgeInsets.only(bottom: box.maxHeight * 0.4),
+                        itemBuilder: (context, vIndex) => _buildRow(
+                          context,
+                          _rowAt(vIndex),
+                          c,
+                          s,
+                          baseStyle,
+                          gutterW,
+                          lineH,
+                          charW,
+                          selection,
+                          activeGuide,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -571,7 +809,9 @@ class _CodeViewState extends State<CodeView> {
               child: _FindBar(
                 width: min(380.0, _viewport.width - 16),
                 controller: _findCtl,
+                replaceController: _replCtl,
                 caseSens: _caseSens,
+                replaceOpen: _replaceOpen,
                 count: _findCtl.text.isEmpty
                     ? ''
                     : _matches.isEmpty
@@ -582,8 +822,11 @@ class _CodeViewState extends State<CodeView> {
                   _caseSens = !_caseSens;
                   _onFindChanged();
                 },
+                onToggleReplace: () => setState(() => _replaceOpen = !_replaceOpen),
                 onNext: () => _stepMatch(1),
                 onPrev: () => _stepMatch(-1),
+                onReplace: _replaceCurrent,
+                onReplaceAll: _replaceAll,
                 onClose: _toggleFind,
               ),
             ),
@@ -592,8 +835,18 @@ class _CodeViewState extends State<CodeView> {
     });
   }
 
-  Widget _buildRow(BuildContext context, int index, dynamic c, dynamic s,
-      TextStyle baseStyle, double gutterW, double lineH, double charW) {
+  Widget _buildRow(
+    BuildContext context,
+    int index,
+    dynamic c,
+    dynamic s,
+    TextStyle baseStyle,
+    double gutterW,
+    double lineH,
+    double charW,
+    (TextPosition, TextPosition)? selection,
+    int activeGuide,
+  ) {
     final lines = widget.model.lines;
     final text = lines[index];
     final model = widget.model;
@@ -601,18 +854,25 @@ class _CodeViewState extends State<CodeView> {
     final gitMark = model.gitMarks[index];
     final foldable = _foldStarts.contains(index);
     final folded = foldable && _folding.isLineFolded(index);
-    final leading = RegExp(r'^\s*').stringMatch(text)?.length ?? 0;
+    final leading = _wsRe.stringMatch(text)?.length ?? 0;
     final guides = leading ~/ CodeView._indentUnit.toInt();
-    final caretLeading =
-        RegExp(r'^\s*').stringMatch(lines[model.row])?.length ?? 0;
-    final activeGuide = max(0, caretLeading ~/ CodeView._indentUnit.toInt() - 1);
     final bracketCols = <int>[
       if (_bracket != null && _bracket!.$1.row == index) _bracket!.$1.col,
       if (_bracket != null && _bracket!.$2.row == index) _bracket!.$2.col,
     ];
 
-    final (ns, ne) = _norm();
-    final selected = _hasSelection && index >= ns.row && index <= ne.row;
+    // Selection rectangle for this row (none for a zero-width tail at col 0).
+    double? selLeft, selWidth;
+    if (selection != null && index >= selection.$1.row && index <= selection.$2.row) {
+      final ns = selection.$1, ne = selection.$2;
+      final from = index == ns.row ? ns.col : 0;
+      final to = index == ne.row ? ne.col : text.length;
+      final span = to - from + (index < ne.row ? 1 : 0);
+      if (span > 0) {
+        selLeft = from * charW;
+        selWidth = max(charW * 0.6, span * charW);
+      }
+    }
 
     return SizedBox(
       height: lineH,
@@ -644,18 +904,12 @@ class _CodeViewState extends State<CodeView> {
                     width: 1,
                     child: ColoredBox(color: i == activeGuide ? c.textFaint : c.border),
                   ),
-                if (selected)
+                if (selLeft != null)
                   Positioned(
-                    left: (index == ns.row ? ns.col : 0) * charW,
+                    left: selLeft,
                     top: 0,
                     bottom: 0,
-                    width: max(
-                      charW * 0.6,
-                      ((index == ne.row ? ne.col : text.length) -
-                                  (index == ns.row ? ns.col : 0) +
-                                  (index < ne.row ? 1 : 0)) *
-                              charW,
-                    ),
+                    width: selWidth,
                     child: ColoredBox(color: c.accentSoft),
                   ),
                 for (final mc in _matchByRow[index] ?? const <int>[])
@@ -666,8 +920,8 @@ class _CodeViewState extends State<CodeView> {
                     width: _findCtl.text.length * charW,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: c.warning.withOpacity(
-                            _matchIdx >= 0 && _matches[_matchIdx] == (index, mc)
+                        color: c.warning.withValues(
+                            alpha: _matchIdx >= 0 && _matches[_matchIdx] == (index, mc)
                                 ? 0.55
                                 : 0.25),
                         border: _matchIdx >= 0 && _matches[_matchIdx] == (index, mc)
@@ -856,30 +1110,37 @@ class _CodeViewState extends State<CodeView> {
 
     if (_hasSelection) {
       final (ns, ne) = _norm();
-      Widget handle(TextPosition p, bool isStart) {
-        final x = _xOfCol(p.col) - 22;
+      Widget? handle(TextPosition p, bool isStart) {
+        final cx = _xOfCol(p.col);
         final y = _yOfRow(p.row) + lineH - 4;
+        // Hide handles that have been scrolled out of view (or under the gutter).
+        if (y < 0 || y > _viewport.height || cx < _codeLeft - 6 || cx > _viewport.width + 6) {
+          return null;
+        }
         return Positioned(
-          left: x,
+          left: cx - 22,
           top: y,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _dragAnchor = isStart ? ne : ns,
             onPanUpdate: (d) {
               final local = _globalToLocal(d.globalPosition);
               final pos = _posFromLocal(local.translate(0, -lineH * 0.9));
               setState(() {
-                if (isStart) {
-                  _selectionStart = pos;
-                  _selectionEnd = ne;
-                } else {
-                  _selectionStart = ns;
-                  _selectionEnd = pos;
-                }
+                // Anchor stays put, so dragging past the other handle just works.
+                _selectionStart = _dragAnchor ?? (isStart ? ne : ns);
+                _selectionEnd = pos;
                 _magnifierPos = local;
               });
             },
-            onPanEnd: (_) => setState(() => _magnifierPos = null),
-            onPanCancel: () => setState(() => _magnifierPos = null),
+            onPanEnd: (_) => setState(() {
+              _magnifierPos = null;
+              _dragAnchor = null;
+            }),
+            onPanCancel: () => setState(() {
+              _magnifierPos = null;
+              _dragAnchor = null;
+            }),
             child: SizedBox(
               width: 44,
               height: 44,
@@ -892,8 +1153,10 @@ class _CodeViewState extends State<CodeView> {
         );
       }
 
-      children.add(handle(ns, true));
-      children.add(handle(ne, false));
+      final hs = handle(ns, true);
+      final he = handle(ne, false);
+      if (hs != null) children.add(hs);
+      if (he != null) children.add(he);
 
       // Toolbar: above selection, flip below if it would leave the viewport.
       var ty = _yOfRow(ns.row) - 46;
@@ -1074,26 +1337,7 @@ class _Autocomplete extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     child: Row(
                       children: [
-                        Expanded(
-                          child: Text.rich(
-                            TextSpan(children: [
-                              TextSpan(
-                                text: prefix,
-                                style: LatticeText.mono(13,
-                                    weight: FontWeight.w500,
-                                    color: c.accent,
-                                    fontFamily: fontFamily),
-                              ),
-                              TextSpan(
-                                text: suggestions[i].label.substring(prefix.length),
-                                style: LatticeText.mono(13,
-                                    color: c.text, fontFamily: fontFamily),
-                              ),
-                            ]),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                        Expanded(child: _label(c, suggestions[i].label)),
                         const SizedBox(width: 8),
                         Text(suggestions[i].kind,
                             style: LatticeText.ui(11, color: c.textMuted)),
@@ -1105,6 +1349,30 @@ class _Autocomplete extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+
+  /// Bold-highlights the typed prefix; falls back to plain text if the label
+  /// doesn't actually start with it (previously threw a RangeError).
+  Widget _label(dynamic c, String label) {
+    final plain = LatticeText.mono(13, color: c.text, fontFamily: fontFamily);
+    final matches = prefix.isNotEmpty &&
+        label.length >= prefix.length &&
+        label.toLowerCase().startsWith(prefix.toLowerCase());
+    if (!matches) {
+      return Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: plain);
+    }
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(
+          text: label.substring(0, prefix.length),
+          style: LatticeText.mono(13,
+              weight: FontWeight.w600, color: c.accent, fontFamily: fontFamily),
+        ),
+        TextSpan(text: label.substring(prefix.length), style: plain),
+      ]),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -1231,8 +1499,8 @@ class _Breadcrumb extends StatelessWidget {
           ),
           IconButton(
             tooltip: 'Find',
-            iconSize: 16,
-            constraints: const BoxConstraints.tightFor(width: 40, height: 32),
+            iconSize: 18,
+            constraints: const BoxConstraints.tightFor(width: 44, height: 32),
             padding: EdgeInsets.zero,
             color: findOpen ? c.accent : c.textMuted,
             onPressed: onFind,
@@ -1245,21 +1513,40 @@ class _Breadcrumb extends StatelessWidget {
 }
 
 class _StatusBar extends StatelessWidget {
-  const _StatusBar({required this.left, required this.right});
+  const _StatusBar({required this.left, required this.right, this.onTapLeft});
   final String left, right;
+  final VoidCallback? onTapLeft;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final st = LatticeText.ui(11, color: Colors.white);
+    // Readable on any accent: white on dark accents, near-black on light ones.
+    final fg = ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF0B0D10);
+    final st = LatticeText.ui(11.5, color: fg);
     return Container(
-      height: 24,
+      height: 28,
       color: c.accent,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
-          Expanded(child: Text(left, style: st, maxLines: 1, overflow: TextOverflow.ellipsis)),
-          Flexible(child: Text(right, style: st, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Expanded(
+            child: InkWell(
+              onTap: onTapLeft,
+              child: Container(
+                height: 28,
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(left, style: st, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ),
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Text(right, style: st, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ),
         ],
       ),
     );
@@ -1270,77 +1557,142 @@ class _FindBar extends StatelessWidget {
   const _FindBar({
     required this.width,
     required this.controller,
+    required this.replaceController,
     required this.caseSens,
+    required this.replaceOpen,
     required this.count,
     required this.onChanged,
     required this.onToggleCase,
+    required this.onToggleReplace,
     required this.onNext,
     required this.onPrev,
+    required this.onReplace,
+    required this.onReplaceAll,
     required this.onClose,
   });
   final double width;
-  final TextEditingController controller;
-  final bool caseSens;
+  final TextEditingController controller, replaceController;
+  final bool caseSens, replaceOpen;
   final String count;
-  final VoidCallback onChanged, onToggleCase, onNext, onPrev, onClose;
+  final VoidCallback onChanged,
+      onToggleCase,
+      onToggleReplace,
+      onNext,
+      onPrev,
+      onReplace,
+      onReplaceAll,
+      onClose;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    Widget btn(IconData i, String tip, VoidCallback f) => IconButton(
+    Widget btn(IconData i, String tip, VoidCallback f, {double w = 36}) => IconButton(
           tooltip: tip,
           iconSize: 18,
-          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+          constraints: BoxConstraints.tightFor(width: w, height: 36),
           padding: EdgeInsets.zero,
           color: c.textMuted,
           onPressed: f,
           icon: Icon(i),
         );
+    Widget textBtn(String label, String tip, VoidCallback f) => Tooltip(
+          message: tip,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: f,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 36, minWidth: 40),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(label,
+                      style: LatticeText.ui(12, weight: FontWeight.w600, color: c.accent)),
+                ),
+              ),
+            ),
+          ),
+        );
+    InputDecoration deco(String hint) => InputDecoration(
+          isDense: true,
+          border: InputBorder.none,
+          hintText: hint,
+          hintStyle: LatticeText.mono(13, color: c.textFaint),
+        );
+
     return Material(
       color: c.raised,
       elevation: 6,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         width: width,
-        padding: const EdgeInsets.only(left: 10, right: 2),
+        padding: const EdgeInsets.only(left: 2, right: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: c.border),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                autofocus: true,
-                onChanged: (_) => onChanged(),
-                onSubmitted: (_) => onNext(),
-                style: LatticeText.mono(13, color: c.text),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: 'Find',
-                  hintStyle: LatticeText.mono(13, color: c.textFaint),
+            Row(
+              children: [
+                btn(replaceOpen ? Icons.expand_more : Icons.chevron_right,
+                    replaceOpen ? 'Hide replace' : 'Show replace', onToggleReplace,
+                    w: 32),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    autofocus: true,
+                    onChanged: (_) => onChanged(),
+                    onSubmitted: (_) => onNext(),
+                    style: LatticeText.mono(13, color: c.text),
+                    cursorColor: c.accent,
+                    decoration: deco('Find'),
+                  ),
                 ),
-              ),
-            ),
-            GestureDetector(
-              onTap: onToggleCase,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: caseSens ? c.accentSoft : null,
-                  border: Border.all(color: caseSens ? c.accent : Colors.transparent),
-                  borderRadius: BorderRadius.circular(4),
+                Tooltip(
+                  message: 'Match case',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: onToggleCase,
+                    child: Container(
+                      width: 36,
+                      height: 30,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: caseSens ? c.accentSoft : null,
+                        border: Border.all(color: caseSens ? c.accent : Colors.transparent),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text('Aa', style: LatticeText.ui(12, color: c.text)),
+                    ),
+                  ),
                 ),
-                child: Text('Aa', style: LatticeText.ui(12, color: c.text)),
-              ),
+                const SizedBox(width: 6),
+                Text(count,
+                    style: LatticeText.ui(11,
+                        color: count == 'No results' ? c.warning : c.textMuted)),
+                btn(Icons.keyboard_arrow_up, 'Previous match', onPrev),
+                btn(Icons.keyboard_arrow_down, 'Next match', onNext),
+                btn(Icons.close, 'Close', onClose),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(count, style: LatticeText.ui(11, color: c.textMuted)),
-            btn(Icons.keyboard_arrow_up, 'Previous match', onPrev),
-            btn(Icons.keyboard_arrow_down, 'Next match', onNext),
-            btn(Icons.close, 'Close', onClose),
+            if (replaceOpen)
+              Row(
+                children: [
+                  const SizedBox(width: 32),
+                  Expanded(
+                    child: TextField(
+                      controller: replaceController,
+                      onSubmitted: (_) => onReplace(),
+                      style: LatticeText.mono(13, color: c.text),
+                      cursorColor: c.accent,
+                      decoration: deco('Replace'),
+                    ),
+                  ),
+                  textBtn('Replace', 'Replace this match', onReplace),
+                  textBtn('All', 'Replace all matches', onReplaceAll),
+                ],
+              ),
           ],
         ),
       ),

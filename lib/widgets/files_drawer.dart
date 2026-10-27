@@ -32,28 +32,85 @@ const _tree = <_Node>[
   _Node('README.md', 0),
 ];
 
-/// File-type tint, like VS Code's icon themes.
-Color? _extColor(String name) {
-  switch (name.contains('.') ? name.split('.').last.toLowerCase() : '') {
+// ───────────────────────── Icon theme ─────────────────────────
+
+class _Glyph {
+  const _Glyph(this.label, this.color);
+  final String label;
+  final Color color;
+}
+
+/// Badge-style file icons (label + tint), like Material Icon Theme.
+_Glyph? _glyphFor(String name) {
+  final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+  switch (ext) {
     case 'ts':
+      return const _Glyph('TS', Color(0xFF3B82F6));
     case 'tsx':
-      return const Color(0xFF3B82F6);
+      return const _Glyph('TSX', Color(0xFF38BDF8));
     case 'dart':
-      return const Color(0xFF22B8CF);
+      return const _Glyph('D', Color(0xFF22B8CF));
     case 'py':
-      return const Color(0xFFEAB308);
+      return const _Glyph('PY', Color(0xFFEAB308));
     case 'cpp':
-      return const Color(0xFF8B5CF6);
+      return const _Glyph('C++', Color(0xFF8B5CF6));
     case 'kt':
-      return const Color(0xFFF97316);
+      return const _Glyph('KT', Color(0xFFF97316));
     case 'json':
+      return const _Glyph('{}', Color(0xFFF59E0B));
+    case 'md':
+      return const _Glyph('MD', Color(0xFF94A3B8));
+    default:
+      return null;
+  }
+}
+
+Color? _folderTint(String name) {
+  switch (name) {
+    case 'src':
+      return const Color(0xFF3B82F6);
+    case 'components':
+      return const Color(0xFF8B5CF6);
+    case 'assets':
       return const Color(0xFFF59E0B);
     default:
       return null;
   }
 }
 
-/// Left side drawer: explorer with collapsible tree, live filter, git status.
+class _FileGlyph extends StatelessWidget {
+  const _FileGlyph(this.name);
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final g = _glyphFor(name);
+    if (g == null) {
+      return iconoir.Page(color: c.textMuted, width: 16, height: 16);
+    }
+    return Container(
+      width: 22,
+      height: 16,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: g.color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        g.label,
+        style: LatticeText.ui(g.label.length > 2 ? 8 : 9,
+            weight: FontWeight.w700, color: g.color),
+      ),
+    );
+  }
+}
+
+// ───────────────────────── Drawer ─────────────────────────
+
+/// Left side drawer: VS Code / PyCharm style project explorer.
+/// Sections (OPEN EDITORS, project tree), compact rows, indent guides,
+/// git decorations, and a status-bar style footer.
 class FilesDrawer extends StatefulWidget {
   const FilesDrawer({
     super.key,
@@ -62,12 +119,18 @@ class FilesDrawer extends StatefulWidget {
     required this.onOpenFile,
     required this.onOpenSettings,
     required this.onOpenSourceControl,
+    this.openFiles = const [],
+    this.projectName = 'lattice-app',
+    this.branch = 'main',
     this.onNewFile,
     this.onNewFolder,
   });
 
   final String activeFile;
   final int changeCount;
+  final List<String> openFiles;
+  final String projectName;
+  final String branch;
   final ValueChanged<String> onOpenFile;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenSourceControl;
@@ -80,6 +143,8 @@ class FilesDrawer extends StatefulWidget {
 
 class _FilesDrawerState extends State<FilesDrawer> {
   final _q = TextEditingController();
+  bool _editorsOpen = true;
+  bool _projectOpen = true;
   late final Set<int> _open = {
     for (var i = 0; i < _tree.length; i++)
       if (_tree[i].folder && _tree[i].open) i
@@ -116,6 +181,13 @@ class _FilesDrawerState extends State<FilesDrawer> {
     return false;
   }
 
+  String? _statusOf(String file) {
+    for (final n in _tree) {
+      if (!n.folder && n.name == file) return n.status;
+    }
+    return null;
+  }
+
   List<int> _visible(String q) {
     if (q.isEmpty) {
       return [
@@ -133,6 +205,12 @@ class _FilesDrawerState extends State<FilesDrawer> {
     return keep.toList()..sort();
   }
 
+  /// Indent-guide that lights up for the folder containing the active file.
+  Set<int> _activePathFolders() {
+    final i = _tree.indexWhere((n) => !n.folder && n.name == widget.activeFile);
+    return i < 0 ? {} : _ancestors(i).toSet();
+  }
+
   @override
   void dispose() {
     _q.dispose();
@@ -144,7 +222,9 @@ class _FilesDrawerState extends State<FilesDrawer> {
     final c = context.c;
     final q = _q.text.trim().toLowerCase();
     final rows = _visible(q);
+    final activeFolders = _activePathFolders();
     final width = min(316.0, MediaQuery.of(context).size.width * 0.86);
+    final showEditors = widget.openFiles.isNotEmpty && q.isEmpty;
 
     return Container(
       width: width,
@@ -156,90 +236,76 @@ class _FilesDrawerState extends State<FilesDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
+            // ── Title bar: EXPLORER + view actions
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
+              padding: const EdgeInsets.fromLTRB(16, 6, 4, 0),
               child: Row(
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('EXPLORER',
-                            style: LatticeText.ui(11,
-                                weight: FontWeight.w600, color: c.textFaint)),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text('lattice-app',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: LatticeText.ui(17,
-                                      weight: FontWeight.w600, color: c.text)),
-                            ),
-                            const SizedBox(width: 8),
-                            const _BranchChip(label: 'main'),
-                          ],
-                        ),
-                      ],
-                    ),
+                    child: Text('EXPLORER',
+                        style: LatticeText.ui(11,
+                            weight: FontWeight.w600, color: c.textMuted)),
                   ),
-                  LIconButton(
-                      icon: iconoir.PagePlus(color: c.text, width: 18, height: 18),
-                      size: 40,
-                      onTap: widget.onNewFile ?? () {}),
-                  LIconButton(
-                      icon: iconoir.FolderPlus(color: c.text, width: 18, height: 18),
-                      size: 40,
-                      onTap: widget.onNewFolder ?? () {}),
                   IconButton(
                     tooltip: 'Collapse all',
-                    constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                    constraints:
+                        const BoxConstraints.tightFor(width: 36, height: 36),
                     padding: EdgeInsets.zero,
-                    iconSize: 20,
-                    color: c.text,
+                    iconSize: 18,
+                    color: c.textMuted,
                     onPressed: () => setState(_open.clear),
                     icon: const Icon(Icons.unfold_less),
+                  ),
+                  IconButton(
+                    tooltip: 'More',
+                    constraints:
+                        const BoxConstraints.tightFor(width: 36, height: 36),
+                    padding: EdgeInsets.zero,
+                    iconSize: 18,
+                    color: c.textMuted,
+                    onPressed: () {},
+                    icon: const Icon(Icons.more_horiz),
                   ),
                 ],
               ),
             ),
-            // Search (live filter)
+            // ── Filter field
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
               child: Container(
-                height: 40,
-                padding: const EdgeInsets.only(left: 12, right: 4),
+                height: 36,
+                padding: const EdgeInsets.only(left: 10, right: 4),
                 decoration: BoxDecoration(
                   color: c.raised,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: c.border),
                 ),
                 child: Row(
                   children: [
-                    iconoir.Search(color: c.textMuted, width: 16, height: 16),
+                    iconoir.Search(color: c.textMuted, width: 15, height: 15),
                     const SizedBox(width: 8),
                     Expanded(
                       child: TextField(
                         controller: _q,
                         onChanged: (_) => setState(() {}),
                         textInputAction: TextInputAction.search,
-                        style: LatticeText.ui(14, color: c.text),
+                        style: LatticeText.ui(13, color: c.text),
                         cursorColor: c.accent,
                         decoration: InputDecoration(
                           isDense: true,
                           border: InputBorder.none,
-                          hintText: 'Search files',
-                          hintStyle: LatticeText.ui(14, color: c.textFaint),
+                          hintText: 'Filter files',
+                          hintStyle: LatticeText.ui(13, color: c.textFaint),
                         ),
                       ),
                     ),
                     if (q.isNotEmpty)
                       IconButton(
                         tooltip: 'Clear',
-                        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+                        constraints:
+                            const BoxConstraints.tightFor(width: 28, height: 28),
                         padding: EdgeInsets.zero,
-                        iconSize: 16,
+                        iconSize: 15,
                         color: c.textMuted,
                         onPressed: () => setState(_q.clear),
                         icon: const Icon(Icons.close),
@@ -248,80 +314,126 @@ class _FilesDrawerState extends State<FilesDrawer> {
                 ),
               ),
             ),
-            // Tree
+            // ── Sections
             Expanded(
               child: rows.isEmpty
                   ? Center(
                       child: Text('No matching files',
                           style: LatticeText.ui(13, color: c.textMuted)),
                     )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      itemCount: rows.length,
-                      itemBuilder: (_, k) {
-                        final i = rows[k];
-                        final n = _tree[i];
-                        return _Row(
-                          node: n,
-                          active: !n.folder && n.name == widget.activeFile,
-                          expanded: q.isNotEmpty || _open.contains(i),
-                          dirty: n.folder && _dirty(i),
-                          query: q,
-                          onTap: n.folder
-                              ? () => setState(() {
-                                    if (!_open.remove(i)) _open.add(i);
-                                  })
-                              : () => widget.onOpenFile(n.name),
-                        );
-                      },
+                  : ListView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        if (showEditors) ...[
+                          _SectionHeader(
+                            title: 'OPEN EDITORS',
+                            expanded: _editorsOpen,
+                            badge: '${widget.openFiles.length}',
+                            onTap: () =>
+                                setState(() => _editorsOpen = !_editorsOpen),
+                          ),
+                          if (_editorsOpen)
+                            for (final f in widget.openFiles)
+                              _OpenEditorRow(
+                                name: f,
+                                active: f == widget.activeFile,
+                                status: _statusOf(f),
+                                onTap: () => widget.onOpenFile(f),
+                              ),
+                        ],
+                        _SectionHeader(
+                          title: widget.projectName.toUpperCase(),
+                          expanded: _projectOpen || q.isNotEmpty,
+                          actions: [
+                            _HeaderAction(
+                              tooltip: 'New file',
+                              icon: iconoir.PagePlus(
+                                  color: c.textMuted, width: 16, height: 16),
+                              onTap: widget.onNewFile ?? () {},
+                            ),
+                            _HeaderAction(
+                              tooltip: 'New folder',
+                              icon: iconoir.FolderPlus(
+                                  color: c.textMuted, width: 16, height: 16),
+                              onTap: widget.onNewFolder ?? () {},
+                            ),
+                          ],
+                          onTap: () =>
+                              setState(() => _projectOpen = !_projectOpen),
+                        ),
+                        if (_projectOpen || q.isNotEmpty)
+                          for (final i in rows)
+                            _TreeRow(
+                              node: _tree[i],
+                              active: !_tree[i].folder &&
+                                  _tree[i].name == widget.activeFile,
+                              expanded: q.isNotEmpty || _open.contains(i),
+                              dirty: _tree[i].folder && _dirty(i),
+                              query: q,
+                              guideFolders: activeFolders,
+                              ancestors: _ancestors(i).toList(),
+                              onTap: _tree[i].folder
+                                  ? () => setState(() {
+                                        if (!_open.remove(i)) _open.add(i);
+                                      })
+                                  : () => widget.onOpenFile(_tree[i].name),
+                            ),
+                      ],
                     ),
             ),
-            Divider(height: 1, color: c.border),
-            // Footer
-            SizedBox(
-              height: 56,
+            // ── Status-bar style footer
+            Container(
+              height: 40,
+              decoration: BoxDecoration(
+                color: c.raised,
+                border: Border(top: BorderSide(color: c.border)),
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: InkWell(
-                      onTap: widget.onOpenSettings,
+                      onTap: widget.onOpenSourceControl,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Row(
                           children: [
-                            iconoir.Settings(color: c.textMuted, width: 18, height: 18),
+                            iconoir.GitBranch(
+                                color: c.accent, width: 14, height: 14),
+                            const SizedBox(width: 6),
+                            Text(widget.branch,
+                                style: LatticeText.ui(12,
+                                    weight: FontWeight.w600, color: c.text)),
                             const SizedBox(width: 10),
-                            Text('Settings',
-                                style: LatticeText.ui(14,
-                                    weight: FontWeight.w500, color: c.text)),
+                            if (widget.changeCount > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: c.warning.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                child: Text('${widget.changeCount}',
+                                    style: LatticeText.ui(11,
+                                        weight: FontWeight.w600,
+                                        color: c.warning)),
+                              )
+                            else
+                              Text('No changes',
+                                  style: LatticeText.ui(12,
+                                      color: c.textMuted)),
                           ],
                         ),
                       ),
                     ),
                   ),
-                  InkWell(
-                    onTap: widget.onOpenSourceControl,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: widget.changeCount > 0
-                              ? c.warning.withValues(alpha: 0.15)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          widget.changeCount == 0
-                              ? 'No changes'
-                              : '${widget.changeCount} change${widget.changeCount == 1 ? '' : 's'}',
-                          style: LatticeText.ui(12,
-                              weight: FontWeight.w500,
-                              color: widget.changeCount > 0 ? c.warning : c.textMuted),
-                        ),
-                      ),
-                    ),
+                  IconButton(
+                    tooltip: 'Settings',
+                    constraints:
+                        const BoxConstraints.tightFor(width: 44, height: 40),
+                    padding: EdgeInsets.zero,
+                    onPressed: widget.onOpenSettings,
+                    icon: iconoir.Settings(
+                        color: c.textMuted, width: 17, height: 17),
                   ),
                 ],
               ),
@@ -333,58 +445,175 @@ class _FilesDrawerState extends State<FilesDrawer> {
   }
 }
 
-class _BranchChip extends StatelessWidget {
-  const _BranchChip({required this.label});
-  final String label;
+// ───────────────────────── Pieces ─────────────────────────
+
+class _HeaderAction extends StatelessWidget {
+  const _HeaderAction(
+      {required this.tooltip, required this.icon, required this.onTap});
+  final String tooltip;
+  final Widget icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 28),
+      padding: EdgeInsets.zero,
+      onPressed: onTap,
+      icon: icon,
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.expanded,
+    required this.onTap,
+    this.badge,
+    this.actions = const [],
+  });
+  final String title;
+  final bool expanded;
+  final VoidCallback onTap;
+  final String? badge;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Container(
-      height: 21,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        color: c.accentSoft,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          iconoir.GitBranch(color: c.accent, width: 12, height: 12),
-          const SizedBox(width: 5),
-          Text(label,
-              style: LatticeText.ui(12, weight: FontWeight.w500, color: c.accent)),
-        ],
+    return Semantics(
+      button: true,
+      expanded: expanded,
+      label: title,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.only(left: 8, right: 4),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: c.border)),
+          ),
+          child: Row(
+            children: [
+              expanded
+                  ? iconoir.NavArrowDown(
+                      color: c.textMuted, width: 16, height: 16)
+                  : iconoir.NavArrowRight(
+                      color: c.textMuted, width: 16, height: 16),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(title,
+                    overflow: TextOverflow.ellipsis,
+                    style: LatticeText.ui(11,
+                        weight: FontWeight.w700, color: c.text)),
+              ),
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: c.accentSoft,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(badge!,
+                      style: LatticeText.ui(10,
+                          weight: FontWeight.w600, color: c.accent)),
+                ),
+              ],
+              const Spacer(),
+              ...actions,
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _Row extends StatelessWidget {
-  const _Row({
+Color _statusColor(dynamic c, String? s) =>
+    s == 'A' ? c.success : (s == 'M' ? c.warning : c.text);
+
+class _OpenEditorRow extends StatelessWidget {
+  const _OpenEditorRow({
+    required this.name,
+    required this.active,
+    required this.status,
+    required this.onTap,
+  });
+  final String name;
+  final bool active;
+  final String? status;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Material(
+      color: active ? c.accentSoft : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 34,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12, right: 12),
+            child: Row(
+              children: [
+                Icon(Icons.close, size: 14, color: c.textFaint),
+                const SizedBox(width: 8),
+                _FileGlyph(name),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(name,
+                      overflow: TextOverflow.ellipsis,
+                      style: LatticeText.ui(13.5,
+                          weight: active ? FontWeight.w600 : FontWeight.w400,
+                          color: _statusColor(c, status))),
+                ),
+                if (status != null)
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                        color: _statusColor(c, status), shape: BoxShape.circle),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TreeRow extends StatelessWidget {
+  const _TreeRow({
     required this.node,
     required this.active,
     required this.expanded,
     required this.dirty,
     required this.query,
+    required this.guideFolders,
+    required this.ancestors,
     this.onTap,
   });
   final _Node node;
   final bool active, expanded, dirty;
   final String query;
+  final Set<int> guideFolders;
+  final List<int> ancestors;
   final VoidCallback? onTap;
 
-  Color _nameColor(dynamic c) {
-    if (node.status == 'A') return c.success;
-    if (node.status == 'M') return c.warning;
-    return c.text;
-  }
+  static const double _indent = 16;
+  static const double _base = 10;
 
   Widget _label(dynamic c) {
     final style = LatticeText.ui(
-      14,
-      weight: active || node.folder ? FontWeight.w500 : FontWeight.w400,
-      color: _nameColor(c),
+      13.5,
+      weight: active ? FontWeight.w600 : FontWeight.w400,
+      color: _statusColor(c, node.status),
     );
     final i = query.isEmpty ? -1 : node.name.toLowerCase().indexOf(query);
     if (i < 0) {
@@ -396,7 +625,9 @@ class _Row extends StatelessWidget {
         TextSpan(
           text: node.name.substring(i, i + query.length),
           style: style.copyWith(
-              color: c.accent, backgroundColor: c.accentSoft, fontWeight: FontWeight.w600),
+              color: c.accent,
+              backgroundColor: c.accentSoft,
+              fontWeight: FontWeight.w700),
         ),
         TextSpan(text: node.name.substring(i + query.length)),
       ]),
@@ -408,85 +639,82 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final tint = _extColor(node.name);
+    final folderTint = _folderTint(node.name) ?? c.textMuted;
+
     return Semantics(
       button: true,
       selected: active,
       expanded: node.folder ? expanded : null,
       label: node.name,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 1),
-        child: Material(
-          color: active ? c.accentSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: SizedBox(
-              height: 40,
-              child: Stack(
-                children: [
-                  // indent guides
-                  for (var d = 0; d < node.depth; d++)
-                    Positioned(
-                      left: 14 + d * 18.0,
-                      top: 0,
-                      bottom: 0,
-                      width: 1,
-                      child: ColoredBox(color: c.border),
-                    ),
-                  if (active)
-                    Positioned(
-                      left: 0,
-                      top: 8,
-                      bottom: 8,
-                      width: 3,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: c.accent,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                  Padding(
-                    padding: EdgeInsets.only(left: 6 + node.depth * 18.0, right: 12),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 16,
-                          child: node.folder
-                              ? (expanded
-                                  ? iconoir.NavArrowDown(
-                                      color: c.textMuted, width: 16, height: 16)
-                                  : iconoir.NavArrowRight(
-                                      color: c.textMuted, width: 16, height: 16))
-                              : null,
-                        ),
-                        const SizedBox(width: 8),
-                        node.folder
-                            ? iconoir.Folder(color: c.accent, width: 18, height: 18)
-                            : iconoir.Page(
-                                color: tint ?? c.textMuted, width: 18, height: 18),
-                        const SizedBox(width: 8),
-                        Expanded(child: _label(c)),
-                        if (node.status != null)
-                          Text(
-                            node.status!,
-                            style: LatticeText.ui(12,
-                                weight: FontWeight.w600, color: _nameColor(c)),
-                          )
-                        else if (dirty)
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                                color: c.warning, shape: BoxShape.circle),
-                          ),
-                      ],
+      child: Material(
+        color: active ? c.accentSoft : Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            height: 34,
+            child: Stack(
+              children: [
+                // indent guides (one per ancestor level, lit on active path)
+                for (var d = 0; d < node.depth; d++)
+                  Positioned(
+                    left: _base + 8 + d * _indent,
+                    top: 0,
+                    bottom: 0,
+                    width: 1,
+                    child: ColoredBox(
+                      color: d < ancestors.length &&
+                              guideFolders
+                                  .contains(ancestors[ancestors.length - 1 - d])
+                          ? c.textFaint
+                          : c.border,
                     ),
                   ),
-                ],
-              ),
+                Padding(
+                  padding: EdgeInsets.only(
+                      left: _base + node.depth * _indent, right: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        child: node.folder
+                            ? (expanded
+                                ? iconoir.NavArrowDown(
+                                    color: c.textMuted, width: 16, height: 16)
+                                : iconoir.NavArrowRight(
+                                    color: c.textMuted, width: 16, height: 16))
+                            : null,
+                      ),
+                      const SizedBox(width: 4),
+                      if (node.folder)
+                        Icon(
+                          expanded
+                              ? Icons.folder_open_rounded
+                              : Icons.folder_rounded,
+                          size: 18,
+                          color: folderTint,
+                        )
+                      else
+                        _FileGlyph(node.name),
+                      const SizedBox(width: 8),
+                      Expanded(child: _label(c)),
+                      if (node.status != null)
+                        Text(
+                          node.status!,
+                          style: LatticeText.ui(11.5,
+                              weight: FontWeight.w700,
+                              color: _statusColor(c, node.status)),
+                        )
+                      else if (dirty)
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                              color: c.warning, shape: BoxShape.circle),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),
