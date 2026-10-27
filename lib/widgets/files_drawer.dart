@@ -3,33 +3,48 @@ import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
+import 'common.dart';
 
+/// A file or folder, addressed by its full path ('src/components/Tabs.tsx').
 class _Node {
-  const _Node(this.name, this.depth,
-      {this.folder = false, this.open = false, this.status});
-  final String name;
-  final int depth;
+  const _Node(this.path, {this.folder = false, this.status});
+  final String path;
   final bool folder;
-  final bool open;
   final String? status; // 'M' | 'A'
+
+  String get name => path.contains('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+  int get depth => '/'.allMatches(path).length;
+  String get parent => path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 }
 
-const _tree = <_Node>[
-  _Node('src', 0, folder: true, open: true),
-  _Node('components', 1, folder: true, open: true),
-  _Node('editor.tsx', 2, status: 'M'),
-  _Node('Tabs.tsx', 2, status: 'A'),
-  _Node('fs.ts', 1, status: 'M'),
-  _Node('App.tsx', 1),
-  _Node('main.dart', 1),
-  _Node('app.py', 1),
-  _Node('native.cpp', 1),
-  _Node('Helper.kt', 1),
-  _Node('assets', 0, folder: true),
-  _Node('package.json', 0),
-  _Node('tsconfig.json', 0),
-  _Node('README.md', 0),
+const _initial = <_Node>[
+  _Node('src', folder: true),
+  _Node('src/components', folder: true),
+  _Node('src/components/editor.tsx', status: 'M'),
+  _Node('src/components/Tabs.tsx', status: 'A'),
+  _Node('src/fs.ts', status: 'M'),
+  _Node('src/App.tsx'),
+  _Node('src/main.dart'),
+  _Node('src/app.py'),
+  _Node('src/native.cpp'),
+  _Node('src/Helper.kt'),
+  _Node('assets', folder: true),
+  _Node('package.json'),
+  _Node('tsconfig.json'),
+  _Node('README.md'),
 ];
+
+class _Pending {
+  const _Pending({required this.folder, required this.dir});
+  final bool folder; // header "new folder" button
+  final String dir; // target directory ('' = project root)
+}
+
+/// Path prefixes of [path], nearest parent first.
+List<String> _ancestorsOf(String path) {
+  final segs = path.split('/');
+  return [for (var i = segs.length - 1; i > 0; i--) segs.sublist(0, i).join('/')];
+}
 
 // ───────────────────────── Icon theme ─────────────────────────
 
@@ -39,7 +54,6 @@ class _Glyph {
   final Color color;
 }
 
-/// Badge-style file icons (label + tint), like Material Icon Theme.
 _Glyph? _glyphFor(String name) {
   final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
   switch (ext) {
@@ -107,9 +121,10 @@ class _FileGlyph extends StatelessWidget {
 
 // ───────────────────────── Drawer ─────────────────────────
 
-/// Left side drawer: VS Code / PyCharm style project explorer.
-/// Sections (OPEN EDITORS, project tree), compact rows, indent guides,
-/// git decorations, and a status-bar style footer.
+/// Header buttons start an INLINE entry row inside the tree (no dialog).
+/// Type a name or a path like `apo/ggg.txt`: missing folders are created.
+/// A trailing `/` creates a folder. Enter or tapping away confirms; the ✕
+/// button (or leaving it empty) cancels.
 class FilesDrawer extends StatefulWidget {
   const FilesDrawer({
     super.key,
@@ -121,20 +136,23 @@ class FilesDrawer extends StatefulWidget {
     this.openFiles = const [],
     this.projectName = 'lattice-app',
     this.branch = 'main',
-    this.onNewFile,
-    this.onNewFolder,
+    this.onCreate,
   });
 
+  /// Matches either a node's full path or its bare name.
   final String activeFile;
   final int changeCount;
   final List<String> openFiles;
   final String projectName;
   final String branch;
+
+  /// Receives the FULL PATH of the file to open (e.g. 'src/fs.ts').
   final ValueChanged<String> onOpenFile;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenSourceControl;
-  final VoidCallback? onNewFile;
-  final VoidCallback? onNewFolder;
+
+  /// Called after a file / folder is created. Persist it to disk here.
+  final void Function(String path, bool isFolder)? onCreate;
 
   @override
   State<FilesDrawer> createState() => _FilesDrawerState();
@@ -142,72 +160,154 @@ class FilesDrawer extends StatefulWidget {
 
 class _FilesDrawerState extends State<FilesDrawer> {
   final _q = TextEditingController();
+  final List<_Node> _items = List.of(_initial);
+  final Set<String> _open = {'src', 'src/components'};
   bool _editorsOpen = true;
   bool _projectOpen = true;
-  late final Set<int> _open = {
-    for (var i = 0; i < _tree.length; i++)
-      if (_tree[i].folder && _tree[i].open) i
-  };
-  late final List<int?> _parent = _buildParents();
+  String? _selected; // last tapped path; decides where "new" is created
+  _Pending? _pending;
 
-  List<int?> _buildParents() {
-    final stack = <int>[];
-    final out = <int?>[];
-    for (var i = 0; i < _tree.length; i++) {
-      while (stack.isNotEmpty && _tree[stack.last].depth >= _tree[i].depth) {
-        stack.removeLast();
-      }
-      out.add(stack.isEmpty ? null : stack.last);
-      if (_tree[i].folder) stack.add(i);
-    }
-    return out;
-  }
+  bool _isActive(_Node n) =>
+      n.path == widget.activeFile || (!n.folder && n.name == widget.activeFile);
 
-  Iterable<int> _ancestors(int i) sync* {
-    var p = _parent[i];
-    while (p != null) {
-      yield p;
-      p = _parent[p];
-    }
-  }
-
-  bool _dirty(int folder) {
-    for (var i = folder + 1;
-        i < _tree.length && _tree[i].depth > _tree[folder].depth;
-        i++) {
-      if (_tree[i].status != null) return true;
-    }
-    return false;
-  }
-
-  String? _statusOf(String file) {
-    for (final n in _tree) {
-      if (!n.folder && n.name == file) return n.status;
+  _Node? _find(String key) {
+    for (final n in _items) {
+      if (n.path == key || (!n.folder && n.name == key)) return n;
     }
     return null;
   }
 
-  List<int> _visible(String q) {
-    if (q.isEmpty) {
-      return [
-        for (var i = 0; i < _tree.length; i++)
-          if (_ancestors(i).every(_open.contains)) i
-      ];
+  /// Folders first, then A→Z, depth-first.
+  List<_Node> _flat() {
+    final byParent = <String, List<_Node>>{};
+    for (final n in _items) {
+      (byParent[n.parent] ??= []).add(n);
     }
-    final keep = <int>{};
-    for (var i = 0; i < _tree.length; i++) {
-      if (!_tree[i].folder && _tree[i].name.toLowerCase().contains(q)) {
-        keep.add(i);
-        keep.addAll(_ancestors(i));
+    int cmp(_Node a, _Node b) {
+      if (a.folder != b.folder) return a.folder ? -1 : 1;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    }
+
+    final out = <_Node>[];
+    void walk(String p) {
+      final kids = (byParent[p] ?? [])..sort(cmp);
+      for (final k in kids) {
+        out.add(k);
+        if (k.folder) walk(k.path);
       }
     }
-    return keep.toList()..sort();
+
+    walk('');
+    return out;
   }
 
-  /// Indent-guide that lights up for the folder containing the active file.
-  Set<int> _activePathFolders() {
-    final i = _tree.indexWhere((n) => !n.folder && n.name == widget.activeFile);
-    return i < 0 ? {} : _ancestors(i).toSet();
+  bool _dirty(String folder) =>
+      _items.any((n) => n.status != null && n.path.startsWith('$folder/'));
+
+  List<_Node> _visible(List<_Node> flat, String q) {
+    if (q.isEmpty) {
+      return [
+        for (final n in flat)
+          if (_ancestorsOf(n.path).every(_open.contains)) n
+      ];
+    }
+    final keep = <String>{};
+    for (final n in flat) {
+      if (!n.folder && n.name.toLowerCase().contains(q)) {
+        keep.add(n.path);
+        keep.addAll(_ancestorsOf(n.path));
+      }
+    }
+    return [for (final n in flat) if (keep.contains(n.path)) n];
+  }
+
+  Set<String> _activePathFolders() {
+    for (final n in _items) {
+      if (!n.folder && _isActive(n)) return _ancestorsOf(n.path).toSet();
+    }
+    return {};
+  }
+
+  // ---- inline create ------------------------------------------------------
+
+  String _targetDir() {
+    final s = _selected;
+    if (s == null) return '';
+    final n = _find(s);
+    if (n == null) return '';
+    return n.folder ? n.path : n.parent;
+  }
+
+  void _startCreate({required bool folder}) {
+    setState(() {
+      _q.clear();
+      _projectOpen = true;
+      final dir = _targetDir();
+      if (dir.isNotEmpty) {
+        _open.add(dir);
+        _open.addAll(_ancestorsOf(dir));
+      }
+      _pending = _Pending(folder: folder, dir: dir);
+    });
+  }
+
+  static final _badChars = RegExp(r'[\\:*?"<>|]');
+
+  /// Returns an error message, or null when [raw] is a valid new path.
+  String? _validate(String raw) {
+    final p = _pending;
+    if (p == null) return null;
+    var t = raw.trim();
+    if (t.isEmpty) return null;
+    if (t.startsWith('/')) return 'A name cannot start with a slash';
+    t = t.replaceAll(RegExp(r'/+$'), '');
+    if (_badChars.hasMatch(t)) return 'Invalid character in name';
+    final segs = t.split('/');
+    if (segs.any((s) => s.isEmpty || s == '.' || s == '..' || s.trim() != s)) {
+      return 'Invalid name';
+    }
+    final full = p.dir.isEmpty ? t : '${p.dir}/$t';
+    if (_items.any((n) => n.path == full)) {
+      return '"${segs.last}" already exists here';
+    }
+    for (final a in _ancestorsOf(full)) {
+      final hit = _items.where((n) => n.path == a);
+      if (hit.isNotEmpty && !hit.first.folder) {
+        return '"${a.split('/').last}" is a file, not a folder';
+      }
+    }
+    return null;
+  }
+
+  void _create(String raw) {
+    final p = _pending;
+    if (p == null) return;
+    var t = raw.trim();
+    final trailing = t.endsWith('/');
+    t = t.replaceAll(RegExp(r'/+$'), '');
+    final isFolder = p.folder || trailing;
+    final full = p.dir.isEmpty ? t : '${p.dir}/$t';
+    final segs = full.split('/');
+    setState(() {
+      var acc = '';
+      for (var i = 0; i < segs.length; i++) {
+        acc = i == 0 ? segs[0] : '$acc/${segs[i]}';
+        final last = i == segs.length - 1;
+        final asFolder = !last || isFolder;
+        if (!_items.any((n) => n.path == acc)) {
+          _items.add(_Node(acc, folder: asFolder, status: asFolder ? null : 'A'));
+        }
+        if (asFolder) _open.add(acc);
+      }
+      _pending = null;
+      _selected = full;
+    });
+    widget.onCreate?.call(full, isFolder);
+    if (!isFolder) widget.onOpenFile(full);
+  }
+
+  void _cancelCreate() {
+    if (_pending != null && mounted) setState(() => _pending = null);
   }
 
   @override
@@ -220,10 +320,46 @@ class _FilesDrawerState extends State<FilesDrawer> {
   Widget build(BuildContext context) {
     final c = context.c;
     final q = _q.text.trim().toLowerCase();
-    final rows = _visible(q);
+    final flat = _flat();
+    final rows = _visible(flat, q);
     final activeFolders = _activePathFolders();
     final width = min(316.0, MediaQuery.of(context).size.width * 0.86);
     final showEditors = widget.openFiles.isNotEmpty && q.isEmpty;
+    final pending = q.isEmpty ? _pending : null;
+
+    final tree = <Widget>[];
+    Widget entryRow(int depth) => _NewEntryRow(
+          key: const ValueKey('new-entry'),
+          depth: depth,
+          folder: pending!.folder,
+          validate: _validate,
+          onSubmit: _create,
+          onCancel: _cancelCreate,
+        );
+    if (pending != null && pending.dir.isEmpty) tree.add(entryRow(0));
+    for (final n in rows) {
+      final expanded = q.isNotEmpty || _open.contains(n.path);
+      tree.add(_TreeRow(
+        node: n,
+        active: _isActive(n),
+        selected: n.path == _selected,
+        expanded: expanded,
+        dirty: n.folder && _dirty(n.path),
+        query: q,
+        guideFolders: activeFolders,
+        ancestors: _ancestorsOf(n.path),
+        onTap: () => setState(() {
+          _selected = n.path;
+          if (n.folder) {
+            if (!_open.remove(n.path)) _open.add(n.path);
+          }
+          if (!n.folder) widget.onOpenFile(n.path);
+        }),
+      ));
+      if (pending != null && n.folder && pending.dir == n.path && expanded) {
+        tree.add(entryRow(n.depth + 1));
+      }
+    }
 
     return Container(
       width: width,
@@ -235,42 +371,66 @@ class _FilesDrawerState extends State<FilesDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Title bar: EXPLORER + view actions
+            // ── Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 4, 0),
+              padding: const EdgeInsets.fromLTRB(16, 6, 12, 6),
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('EXPLORER',
-                        style: LatticeText.ui(11,
-                            weight: FontWeight.w600, color: c.textMuted)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.projectName,
+                            overflow: TextOverflow.ellipsis,
+                            style: LatticeText.ui(17,
+                                weight: FontWeight.w600, color: c.text)),
+                        const SizedBox(height: 4),
+                        Container(
+                          height: 21,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: c.accentSoft,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              iconoir.GitBranch(
+                                  color: c.accent, width: 12, height: 12),
+                              const SizedBox(width: 5),
+                              Text(widget.branch,
+                                  style: LatticeText.ui(12,
+                                      weight: FontWeight.w500,
+                                      color: c.accent)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  IconButton(
-                    tooltip: 'Collapse all',
-                    constraints:
-                        const BoxConstraints.tightFor(width: 36, height: 36),
-                    padding: EdgeInsets.zero,
-                    iconSize: 18,
-                    color: c.textMuted,
-                    onPressed: () => setState(_open.clear),
-                    icon: const Icon(Icons.unfold_less),
+                  Tooltip(
+                    message: 'New file',
+                    child: LIconButton(
+                        icon: iconoir.PagePlus(
+                            color: c.text, width: 18, height: 18),
+                        size: 36,
+                        onTap: () => _startCreate(folder: false)),
                   ),
-                  IconButton(
-                    tooltip: 'More',
-                    constraints:
-                        const BoxConstraints.tightFor(width: 36, height: 36),
-                    padding: EdgeInsets.zero,
-                    iconSize: 18,
-                    color: c.textMuted,
-                    onPressed: () {},
-                    icon: const Icon(Icons.more_horiz),
+                  const SizedBox(width: 10),
+                  Tooltip(
+                    message: 'New folder',
+                    child: LIconButton(
+                        icon: iconoir.FolderPlus(
+                            color: c.text, width: 18, height: 18),
+                        size: 36,
+                        onTap: () => _startCreate(folder: true)),
                   ),
                 ],
               ),
             ),
             // ── Filter field
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
               child: Container(
                 height: 36,
                 padding: const EdgeInsets.only(left: 10, right: 4),
@@ -315,7 +475,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
             ),
             // ── Sections
             Expanded(
-              child: rows.isEmpty
+              child: rows.isEmpty && pending == null
                   ? Center(
                       child: Text('No matching files',
                           style: LatticeText.ui(13, color: c.textMuted)),
@@ -334,10 +494,11 @@ class _FilesDrawerState extends State<FilesDrawer> {
                           if (_editorsOpen)
                             for (final f in widget.openFiles)
                               _OpenEditorRow(
-                                name: f,
-                                active: f == widget.activeFile,
-                                status: _statusOf(f),
-                                onTap: () => widget.onOpenFile(f),
+                                name: f.split('/').last,
+                                active: f == widget.activeFile ||
+                                    f.split('/').last == widget.activeFile,
+                                status: _find(f)?.status,
+                                onTap: () => widget.onOpenFile(_find(f)?.path ?? f),
                               ),
                         ],
                         _SectionHeader(
@@ -345,42 +506,26 @@ class _FilesDrawerState extends State<FilesDrawer> {
                           expanded: _projectOpen || q.isNotEmpty,
                           actions: [
                             _HeaderAction(
-                              tooltip: 'New file',
-                              icon: iconoir.PagePlus(
-                                  color: c.textMuted, width: 16, height: 16),
-                              onTap: widget.onNewFile ?? () {},
-                            ),
-                            _HeaderAction(
-                              tooltip: 'New folder',
-                              icon: iconoir.FolderPlus(
-                                  color: c.textMuted, width: 16, height: 16),
-                              onTap: widget.onNewFolder ?? () {},
+                              tooltip: 'Collapse all',
+                              icon: Icon(Icons.unfold_less,
+                                  size: 16, color: c.textMuted),
+                              onTap: () => setState(() {
+                                _open.clear();
+                                _selected = null;
+                              }),
                             ),
                           ],
-                          onTap: () =>
-                              setState(() => _projectOpen = !_projectOpen),
+                          // Tapping the project row also targets the root.
+                          onTap: () => setState(() {
+                            _projectOpen = !_projectOpen;
+                            _selected = null;
+                          }),
                         ),
-                        if (_projectOpen || q.isNotEmpty)
-                          for (final i in rows)
-                            _TreeRow(
-                              node: _tree[i],
-                              active: !_tree[i].folder &&
-                                  _tree[i].name == widget.activeFile,
-                              expanded: q.isNotEmpty || _open.contains(i),
-                              dirty: _tree[i].folder && _dirty(i),
-                              query: q,
-                              guideFolders: activeFolders,
-                              ancestors: _ancestors(i).toList(),
-                              onTap: _tree[i].folder
-                                  ? () => setState(() {
-                                        if (!_open.remove(i)) _open.add(i);
-                                      })
-                                  : () => widget.onOpenFile(_tree[i].name),
-                            ),
+                        if (_projectOpen || q.isNotEmpty) ...tree,
                       ],
                     ),
             ),
-            // ── Status-bar style footer
+            // ── Footer
             Container(
               height: 40,
               decoration: BoxDecoration(
@@ -396,10 +541,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Row(
                           children: [
-                            iconoir.GitBranch(
-                                color: c.accent, width: 14, height: 14),
-                            const SizedBox(width: 6),
-                            Text(widget.branch,
+                            Text('Source control',
                                 style: LatticeText.ui(12,
                                     weight: FontWeight.w600, color: c.text)),
                             const SizedBox(width: 10),
@@ -440,6 +582,176 @@ class _FilesDrawerState extends State<FilesDrawer> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ───────────────────────── Inline entry row ─────────────────────────
+
+class _NewEntryRow extends StatefulWidget {
+  const _NewEntryRow({
+    super.key,
+    required this.depth,
+    required this.folder,
+    required this.validate,
+    required this.onSubmit,
+    required this.onCancel,
+  });
+  final int depth;
+  final bool folder;
+  final String? Function(String) validate;
+  final ValueChanged<String> onSubmit;
+  final VoidCallback onCancel;
+
+  @override
+  State<_NewEntryRow> createState() => _NewEntryRowState();
+}
+
+class _NewEntryRowState extends State<_NewEntryRow> {
+  final _ctl = TextEditingController();
+  final _focus = FocusNode();
+  String? _error;
+  bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocus);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Scrollable.ensureVisible(context);
+    });
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_onFocus);
+    _focus.dispose();
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  /// Like VS Code: leaving the field confirms a valid name, cancels otherwise.
+  void _onFocus() {
+    if (_focus.hasFocus || _done) return;
+    final t = _ctl.text.trim();
+    _done = true;
+    if (t.isEmpty || widget.validate(t) != null) {
+      widget.onCancel();
+    } else {
+      widget.onSubmit(t);
+    }
+  }
+
+  void _submit() {
+    final t = _ctl.text.trim();
+    if (t.isEmpty) {
+      _done = true;
+      widget.onCancel();
+      return;
+    }
+    final e = widget.validate(t);
+    if (e != null) {
+      setState(() => _error = e);
+      return; // keep editing
+    }
+    _done = true;
+    widget.onSubmit(t);
+  }
+
+  void _cancel() {
+    _done = true;
+    widget.onCancel();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final text = _ctl.text.trim();
+    final isFolder = widget.folder || text.endsWith('/');
+    final leaf = text.replaceAll(RegExp(r'/+$'), '').split('/').last;
+    final left = _TreeRow._base + widget.depth * _TreeRow._indent;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 34,
+          child: Padding(
+            padding: EdgeInsets.only(left: left, right: 6),
+            child: Row(
+              children: [
+                const SizedBox(width: 20),
+                if (isFolder)
+                  Icon(Icons.folder_rounded, size: 18, color: c.textMuted)
+                else
+                  _FileGlyph(leaf),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    height: 26,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    alignment: Alignment.centerLeft,
+                    decoration: BoxDecoration(
+                      color: c.raised,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                          color: _error != null ? c.error : c.accent),
+                    ),
+                    child: TextField(
+                      controller: _ctl,
+                      focusNode: _focus,
+                      autofocus: true,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textInputAction: TextInputAction.done,
+                      // onEditingComplete (not onSubmitted) so the field keeps
+                      // focus when the name is invalid.
+                      onEditingComplete: _submit,
+                      onChanged: (v) => setState(() {
+                        _error = widget.validate(v);
+                      }),
+                      style: LatticeText.ui(13, color: c.text),
+                      cursorColor: c.accent,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: InputBorder.none,
+                        hintText: widget.folder
+                            ? 'folder or path/to/folder'
+                            : 'file.ext or folder/file.ext',
+                        hintStyle: LatticeText.ui(13, color: c.textFaint),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Cancel',
+                  constraints:
+                      const BoxConstraints.tightFor(width: 32, height: 32),
+                  padding: EdgeInsets.zero,
+                  iconSize: 15,
+                  color: c.textMuted,
+                  // Prevent the tap from first causing a focus-loss "confirm".
+                  onPressed: _cancel,
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_error != null)
+          Container(
+            width: double.infinity,
+            margin: EdgeInsets.only(left: left + 44, right: 10, bottom: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: c.error.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: c.error),
+            ),
+            child: Text(_error!,
+                style: LatticeText.ui(12, color: c.error)),
+          ),
+      ],
     );
   }
 }
@@ -591,6 +903,7 @@ class _TreeRow extends StatelessWidget {
   const _TreeRow({
     required this.node,
     required this.active,
+    required this.selected,
     required this.expanded,
     required this.dirty,
     required this.query,
@@ -599,10 +912,10 @@ class _TreeRow extends StatelessWidget {
     this.onTap,
   });
   final _Node node;
-  final bool active, expanded, dirty;
+  final bool active, selected, expanded, dirty;
   final String query;
-  final Set<int> guideFolders;
-  final List<int> ancestors;
+  final Set<String> guideFolders;
+  final List<String> ancestors; // nearest parent first
   final VoidCallback? onTap;
 
   static const double _indent = 16;
@@ -614,21 +927,22 @@ class _TreeRow extends StatelessWidget {
       weight: active ? FontWeight.w600 : FontWeight.w400,
       color: _statusColor(c, node.status),
     );
-    final i = query.isEmpty ? -1 : node.name.toLowerCase().indexOf(query);
+    final name = node.name;
+    final i = query.isEmpty ? -1 : name.toLowerCase().indexOf(query);
     if (i < 0) {
-      return Text(node.name, overflow: TextOverflow.ellipsis, style: style);
+      return Text(name, overflow: TextOverflow.ellipsis, style: style);
     }
     return Text.rich(
       TextSpan(children: [
-        TextSpan(text: node.name.substring(0, i)),
+        TextSpan(text: name.substring(0, i)),
         TextSpan(
-          text: node.name.substring(i, i + query.length),
+          text: name.substring(i, i + query.length),
           style: style.copyWith(
               color: c.accent,
               backgroundColor: c.accentSoft,
               fontWeight: FontWeight.w700),
         ),
-        TextSpan(text: node.name.substring(i + query.length)),
+        TextSpan(text: name.substring(i + query.length)),
       ]),
       style: style,
       overflow: TextOverflow.ellipsis,
@@ -646,14 +960,15 @@ class _TreeRow extends StatelessWidget {
       expanded: node.folder ? expanded : null,
       label: node.name,
       child: Material(
-        color: active ? c.accentSoft : Colors.transparent,
+        color: active
+            ? c.accentSoft
+            : (selected ? c.raised : Colors.transparent),
         child: InkWell(
           onTap: onTap,
           child: SizedBox(
             height: 34,
             child: Stack(
               children: [
-                // indent guides (one per ancestor level, lit on active path)
                 for (var d = 0; d < node.depth; d++)
                   Positioned(
                     left: _base + 8 + d * _indent,

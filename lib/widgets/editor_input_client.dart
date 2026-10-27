@@ -1,222 +1,158 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/document.dart';
 import '../models/editor_model.dart';
+import 'code_view.dart' show rowColToOffset, offsetToRowCol;
 
-int _rowColToOffset(List<String> lines, int row, int col) {
-  var offset = 0;
-  final r = row.clamp(0, lines.isEmpty ? 0 : lines.length - 1);
-  for (var i = 0; i < r; i++) {
-    offset += lines[i].length + 1;
-  }
-  final c = col.clamp(0, lines.isEmpty ? 0 : lines[r].length);
-  return offset + c;
-}
-
-(int row, int col) _offsetToRowCol(List<String> lines, int offset) {
-  if (lines.isEmpty) return (0, 0);
-  var current = 0;
-  for (var i = 0; i < lines.length; i++) {
-    final len = lines[i].length;
-    if (offset <= current + len) {
-      return (i, offset - current);
-    }
-    current += len + 1;
-  }
-  return (lines.length - 1, lines.last.length);
-}
-
-/// Direct [DeltaTextInputClient] implementation for text editing without hidden
-/// TextField sentinel hacks. Correctly handles complex IME deltas, selection, and
-/// composing ranges (essential for soft gesture keyboards and phonetic IMEs like Bangla).
-class EditorInputClient implements DeltaTextInputClient {
+/// Bridges the phone keyboard (IME) and [EditorModel].
+///
+/// The IME keeps its own copy of (text, selection). Two rules make Backspace,
+/// Cut and "type over selection" work:
+///  1. Use the delta model: the keyboard reports exact insert / delete /
+///     replace operations (backspace == TextEditingDeltaDeletion).
+///  2. Whenever caret or selection change outside the keyboard (tap, find,
+///     go-to-line, handles, cut, paste ...) call [syncToIme] so the keyboard
+///     knows the real caret. A stale caret is why Backspace did nothing.
+///
+/// The mirrored text is the whole document joined with '\n'. For very large
+/// files (>200k chars) switch to a window around the caret.
+class EditorInputClient with TextInputClient, DeltaTextInputClient {
   EditorInputClient({
     required this.model,
+    required this.setCaret,
     required this.onEditingChanged,
-  }) {
-    _syncValueFromModel();
-  }
+  });
 
   final EditorModel model;
+
+  /// Moves the model's caret. Wired in CodeView (_setCaretRaw).
+  final void Function(int row, int col) setCaret;
   final VoidCallback onEditingChanged;
 
-  TextInputConnection? _connection;
-  TextEditingValue _currentValue = TextEditingValue.empty;
-  TextRange _composing = TextRange.empty;
+  TextInputConnection? _conn;
+  TextEditingValue _value = TextEditingValue.empty;
 
-  bool get isAttached => _connection != null && _connection!.attached;
-  TextRange get composing => _composing;
-
-  @override
-  TextEditingValue? get currentTextEditingValue => _currentValue;
+  bool get attached => _conn?.attached ?? false;
 
   void attach() {
-    if (isAttached) return;
-
-    _syncValueFromModel();
-    _connection = TextInput.attach(
+    if (attached) {
+      _conn!.show();
+      return;
+    }
+    _conn = TextInput.attach(
       this,
       const TextInputConfiguration(
         inputType: TextInputType.multiline,
+        inputAction: TextInputAction.newline,
         enableDeltaModel: true,
         autocorrect: false,
         enableSuggestions: false,
-        inputAction: TextInputAction.newline,
+        textCapitalization: TextCapitalization.none,
       ),
     );
-    _connection!.setEditingState(_currentValue);
-    _connection!.show();
+    syncToIme();
+    _conn!.show();
   }
 
   void detach() {
-    if (_connection != null) {
-      if (_connection!.attached) {
-        _connection!.close();
-      }
-      _connection = null;
-    }
+    _conn?.close();
+    _conn = null;
+  }
+
+  /// Push the current text + caret (or selection [a]..[b]) to the keyboard.
+  void syncToIme([TextPosition? a, TextPosition? b]) {
+    final conn = _conn;
+    if (conn == null || !conn.attached) return;
+    final lines = model.lines;
+    final p1 = a ?? TextPosition(model.row, model.col);
+    final p2 = b ?? p1;
+    _value = TextEditingValue(
+      text: lines.join('\n'),
+      selection: TextSelection(
+        baseOffset: rowColToOffset(lines, p1.row, p1.col),
+        extentOffset: rowColToOffset(lines, p2.row, p2.col),
+      ),
+    );
+    conn.setEditingState(_value);
   }
 
   void updateModelSelection(int row, int col) {
-    model.moveTo(row, col);
-    _syncValueFromModel();
-    _connection?.setEditingState(_currentValue);
+    setCaret(row, col);
+    syncToIme();
+    onEditingChanged();
   }
 
-  void _syncValueFromModel() {
-    final text = model.text;
-    final offset = _rowColToOffset(model.lines, model.row, model.col)
-        .clamp(0, text.length);
-    _currentValue = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: offset),
-      composing: _composing,
-    );
-  }
+  // ---- keyboard -> model --------------------------------------------------
 
   @override
   void updateEditingValueWithDeltas(List<TextEditingDelta> deltas) {
-    var newText = _currentValue.text;
-    var selectionStart = _currentValue.selection.start;
-    TextRange newComposing = _composing;
-    var hasTextChanges = false;
+    final doc = model.document;
+    for (final d in deltas) {
+      final lines = model.lines;
 
-    for (final delta in deltas) {
-      if (delta is TextEditingDeltaInsertion) {
-        final insertOffset = delta.insertionOffset.clamp(0, newText.length);
-        final inserted = delta.textInserted;
-        newText = newText.replaceRange(insertOffset, insertOffset, inserted);
-        selectionStart = insertOffset + inserted.length;
-        newComposing = delta.composing;
-        hasTextChanges = true;
-      } else if (delta is TextEditingDeltaDeletion) {
-        final start = delta.deletedRange.start.clamp(0, newText.length);
-        final end = delta.deletedRange.end.clamp(0, newText.length);
-        if (start < end) {
-          newText = newText.replaceRange(start, end, '');
-          selectionStart = start;
-        }
-        newComposing = delta.composing;
-        hasTextChanges = true;
-      } else if (delta is TextEditingDeltaReplacement) {
-        final start = delta.replacedRange.start.clamp(0, newText.length);
-        final end = delta.replacedRange.end.clamp(0, newText.length);
-        final replacement = delta.replacementText;
-        if (start <= end) {
-          newText = newText.replaceRange(start, end, replacement);
-          selectionStart = start + replacement.length;
-        }
-        newComposing = delta.composing;
-        hasTextChanges = true;
-      } else if (delta is TextEditingDeltaNonTextUpdate) {
-        selectionStart = delta.selection.start.clamp(0, newText.length);
-        newComposing = delta.composing;
+      void replace(int from, int to, String text) {
+        final s = offsetToRowCol(lines, from);
+        final e = offsetToRowCol(lines, to);
+        doc.replaceRange(
+            TextPosition(s.$1, s.$2), TextPosition(e.$1, e.$2), text);
       }
+
+      if (d is TextEditingDeltaInsertion) {
+        replace(d.insertionOffset, d.insertionOffset, d.textInserted);
+      } else if (d is TextEditingDeltaDeletion) {
+        // Backspace, Delete, Cut, delete-selection
+        replace(d.deletedRange.start, d.deletedRange.end, '');
+      } else if (d is TextEditingDeltaReplacement) {
+        // Typing over a selection, autocorrect, composing (Bengali etc.)
+        replace(d.replacedRange.start, d.replacedRange.end, d.replacementText);
+      }
+      // TextEditingDeltaNonTextUpdate: only the caret moved (handled below).
     }
-
-    _composing = newComposing;
-
-    final lines = newText.split('\n');
-    final safeOffset = selectionStart.clamp(0, newText.length);
-    final (row, col) = _offsetToRowCol(lines, safeOffset);
-
-    if (hasTextChanges) {
-      const oldPosStart = TextPosition(0, 0);
-      final oldPosEnd = model.document.offsetToPosition(model.text.length);
-      model.document.replaceRange(oldPosStart, oldPosEnd, newText);
-      model.document.cursorPosition = TextPosition(row, col);
-      model.dirty = true;
-    } else {
-      model.updateState(
-        newLines: lines,
-        newRow: row,
-        newCol: col,
-        isDirty: true,
+    if (deltas.isNotEmpty) {
+      final sel = deltas.last.selection;
+      if (sel.isValid) {
+        final rc = offsetToRowCol(model.lines, sel.extentOffset);
+        setCaret(rc.$1, rc.$2);
+      }
+      _value = TextEditingValue(
+        text: model.lines.join('\n'),
+        selection: deltas.last.selection,
+        composing: deltas.last.composing,
       );
     }
-
-    _syncValueFromModel();
     onEditingChanged();
   }
 
   @override
   void updateEditingValue(TextEditingValue value) {
-    _currentValue = value;
-    _composing = value.composing;
-
-    final lines = value.text.split('\n');
-    final (row, col) = _offsetToRowCol(lines, value.selection.baseOffset);
-
-    if (value.text != model.text) {
-      const oldPosStart = TextPosition(0, 0);
-      final oldPosEnd = model.document.offsetToPosition(model.text.length);
-      model.document.replaceRange(oldPosStart, oldPosEnd, value.text);
-      model.document.cursorPosition = TextPosition(row, col);
-      model.dirty = true;
-    } else {
-      model.updateState(
-        newLines: lines,
-        newRow: row,
-        newCol: col,
-        isDirty: true,
-      );
-    }
-
-    onEditingChanged();
+    // Unused: delta model delivers changes via updateEditingValueWithDeltas.
   }
+
+  @override
+  TextEditingValue get currentTextEditingValue => _value;
+
+  @override
+  AutofillScope? get currentAutofillScope => null;
 
   @override
   void performAction(TextInputAction action) {
-    if (action == TextInputAction.newline) {
-      model.newline();
-      _syncValueFromModel();
-      _connection?.setEditingState(_currentValue);
-      onEditingChanged();
-    }
+    if (action == TextInputAction.newline) model.insert('\n');
   }
 
   @override
-  void connectionClosed() {
-    _connection = null;
-  }
-
-  bool onFocusReceived() => true;
-
-  @override
-  void didChangeInputControl(TextInputControl? oldControl, TextInputControl? newControl) {}
-
-  @override
-  void performSelector(String selectorName) {}
-
-  @override
-  void showAutocorrectionPromptRect(int start, int end) {}
-
-  void showAutocorrectPromptRect(int start, int end) {}
+  void connectionClosed() => _conn = null;
 
   @override
   void performPrivateCommand(String action, Map<String, dynamic> data) {}
 
   @override
+  void showAutocorrectionPromptRect(int start, int end) {}
+
+  @override
   void updateFloatingCursor(RawFloatingCursorPoint point) {}
+
+  @override
+  void showToolbar() {}
 
   @override
   void insertTextPlaceholder(Size size) {}
@@ -225,11 +161,9 @@ class EditorInputClient implements DeltaTextInputClient {
   void removeTextPlaceholder() {}
 
   @override
-  void showToolbar() {}
+  void didChangeInputControl(
+      TextInputControl? oldControl, TextInputControl? newControl) {}
 
   @override
-  void insertContent(KeyboardInsertedContent content) {}
-
-  @override
-  AutofillScope? get currentAutofillScope => null;
+  void performSelector(String selectorName) {}
 }

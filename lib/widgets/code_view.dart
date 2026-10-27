@@ -35,35 +35,29 @@ int rowColToOffset(List<String> lines, int row, int col) {
 
 /// Virtualized code view.
 ///
-/// Fixes in this version:
-///  - swapping [EditorModel] / [FoldingModel] now rebuilds the input client
-///    (typing used to go to the previous document after a tab switch)
-///  - selection is validated against the document and dropped when the text
-///    changes (stale ranges could throw RangeError in copy / cut)
-///  - taps are handled on tap-UP, so starting a scroll no longer moves the
-///    caret or pops the keyboard; double-tap is detected without delaying taps
-///  - handle drag uses a fixed anchor, so dragging one handle past the other works
-///  - char width is measured from the real font (and text scaling is pinned),
-///    so caret / selection / taps line up with the glyphs
-///  - sticky-scope lookups are cached (they used to rescan up to 3000 lines on
-///    every scroll frame) and the caret is kept out from under the sticky header
-///  - caret is re-revealed when the keyboard shrinks the viewport
-///  - autocomplete no longer throws when a label is shorter than the prefix
-///  - selection handles hide when scrolled out of view, no 1-char stub at col 0
+/// Changes in this version (on top of the previous one):
+///  - IME sync: selection and caret are pushed to the keyboard (syncToIme), so
+///    Backspace / Cut / Replace-selection work with the phone keyboard
+///  - delta based input client (see editor_input_client.dart)
+///  - hardware shortcuts: Ctrl/Cmd + C X V A F G, Escape
+///  - Unicode-aware word selection (Bengali etc.)
+///  - Find bar close gives the keyboard back to the editor
+///  - replace-all is batched (one recompute instead of thousands)
+///  - settings respected: lineNumbers, minimap
+///  - indent guides follow the file's real indent (2 / 4 / 8)
+///  - lines list, diagnostics and hashes are computed once per build
+///  - leaks fixed (go-to-line controller, own FoldingModel, focus node)
+///  - larger autocomplete touch targets, Semantics label
 ///
-/// New:
-///  - find & replace (replace one / replace all)
-///  - tap the line-number gutter to select a line
-///  - tap "Ln, Col" in the status bar to jump to a line
-///  - horizontal scrollbar, scroll-past-end, anchored long-press word-drag
-///  - status bar picks a readable foreground for any accent colour
+/// Known limitation: caret math assumes one cell per UTF-16 unit. Bengali
+/// conjuncts, emoji and tabs can drift; fixing that needs per-line text
+/// measurement with TextPainter.
 class CodeView extends StatefulWidget {
   const CodeView({super.key, required this.model, this.foldingModel});
   final EditorModel model;
   final FoldingModel? foldingModel;
 
   static const double _topPad = 8;
-  static const double _indentUnit = 2;
   static const double _toolbarW = 270;
 
   @override
@@ -73,35 +67,36 @@ class CodeView extends StatefulWidget {
 class _CodeViewState extends State<CodeView> {
   late EditorInputClient _inputClient;
   late FoldingModel _folding;
+  bool _ownFolding = false;
   final _v = ScrollController();
   final _h = ScrollController();
   final _stackKey = GlobalKey();
+  final _focus = FocusNode(debugLabel: 'code-view');
 
   static final _wsRe = RegExp(r'^\s*');
-  static final _wordRe = RegExp(r'[\w$]');
+  static final _wordRe = RegExp(r'[\p{L}\p{M}\p{N}_$]', unicode: true);
 
   TextPosition? _selectionStart;
   TextPosition? _selectionEnd;
-  TextPosition? _dragAnchor; // fixed end while a handle is dragged
+  TextPosition? _dragAnchor;
   TextPosition _wordStart = const TextPosition(0, 0);
   TextPosition _wordEnd = const TextPosition(0, 0);
   Offset? _magnifierPos;
 
-  // Manual double-tap detection (keeps single taps instant).
   DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
   Offset _lastTapPos = Offset.zero;
 
-  // Cached layout data (recomputed on model/fold change only).
   late var _regions = _folding.calculateFoldRegions(widget.model.document);
   Set<int> _foldStarts = {};
-  List<int>? _visible; // null => identity mapping (nothing folded)
+  List<int>? _visible;
   int _longest = 0;
   int _docSig = 0;
+  int _indent = 2;
+  bool _batching = false;
   final Map<int, List<int>> _scopeCache = {};
 
   (TextPosition, TextPosition)? _bracket;
 
-  // Find / replace state
   bool _findOpen = false, _caseSens = false, _replaceOpen = false;
   final _findCtl = TextEditingController();
   final _replCtl = TextEditingController();
@@ -109,13 +104,16 @@ class _CodeViewState extends State<CodeView> {
   Map<int, List<int>> _matchByRow = {};
   int _matchIdx = -1;
 
-  // Metrics captured in build for gesture math.
   double _lineH = 20, _charW = 8, _codeLeft = 56;
   Size _viewport = Size.zero;
   double? _lastViewportH;
 
+  // ADAPTER: the only place that needs your EditorModel's caret setter.
+  void _setCaretRaw(int row, int col) => widget.model.moveCaret(row, col);
+
   EditorInputClient _makeClient() => EditorInputClient(
         model: widget.model,
+        setCaret: _setCaretRaw,
         onEditingChanged: () {
           if (mounted) setState(() {});
         },
@@ -124,6 +122,7 @@ class _CodeViewState extends State<CodeView> {
   @override
   void initState() {
     super.initState();
+    _ownFolding = widget.foldingModel == null;
     _folding = widget.foldingModel ?? FoldingModel();
     _inputClient = _makeClient();
     widget.model.addListener(_onModelChanged);
@@ -137,6 +136,8 @@ class _CodeViewState extends State<CodeView> {
     var changed = false;
     if (old.foldingModel != widget.foldingModel) {
       _folding.removeListener(_onFoldChanged);
+      if (_ownFolding) _folding.dispose();
+      _ownFolding = widget.foldingModel == null;
       _folding = widget.foldingModel ?? FoldingModel();
       _folding.addListener(_onFoldChanged);
       changed = true;
@@ -145,7 +146,7 @@ class _CodeViewState extends State<CodeView> {
       old.model.removeListener(_onModelChanged);
       widget.model.addListener(_onModelChanged);
       _inputClient.detach();
-      _inputClient = _makeClient(); // was bound to the old document
+      _inputClient = _makeClient();
       _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
       _matches = [];
       _matchByRow = {};
@@ -164,17 +165,46 @@ class _CodeViewState extends State<CodeView> {
   void dispose() {
     widget.model.removeListener(_onModelChanged);
     _folding.removeListener(_onFoldChanged);
+    if (_ownFolding) _folding.dispose();
     _inputClient.detach();
     _v.dispose();
     _h.dispose();
+    _focus.dispose();
     _findCtl.dispose();
     _replCtl.dispose();
     super.dispose();
   }
 
+  // ---- IME helpers --------------------------------------------------------
+
+  /// Push caret / selection to the keyboard. Without this the keyboard keeps a
+  /// stale caret and Backspace / Cut act on the wrong (often empty) range.
+  void _syncIme() {
+    if (_hasSelection) {
+      final (s, e) = _norm();
+      _inputClient.syncToIme(s, e);
+    } else {
+      _inputClient.syncToIme();
+    }
+  }
+
+  void _setCaret(TextPosition p) => _inputClient.updateModelSelection(p.row, p.col);
+
   // ---- cached layout ------------------------------------------------------
 
-  void _recompute() {
+  int _detectIndent(List<String> lines) {
+    var best = 0;
+    final n = min(lines.length, 400);
+    for (var i = 0; i < n; i++) {
+      final l = lines[i];
+      if (l.trim().isEmpty) continue;
+      final lead = l.length - l.trimLeft().length;
+      if (lead > 0 && (best == 0 || lead < best)) best = lead;
+    }
+    return best == 0 ? 2 : best.clamp(2, 8);
+  }
+
+  void _recompute([int? sig]) {
     final lines = widget.model.lines;
     _regions = _folding.calculateFoldRegions(widget.model.document);
     _foldStarts = {for (final r in _regions) r.startLine};
@@ -186,8 +216,9 @@ class _CodeViewState extends State<CodeView> {
           ]
         : null;
     _longest = lines.fold<int>(0, (m, l) => l.length > m ? l.length : m);
+    _indent = _detectIndent(lines);
     _scopeCache.clear();
-    _docSig = Object.hashAll(lines);
+    _docSig = sig ?? Object.hashAll(lines);
     if (_findOpen) _computeMatches();
   }
 
@@ -210,11 +241,11 @@ class _CodeViewState extends State<CodeView> {
   }
 
   void _onModelChanged() {
-    if (!mounted) return;
-    final textChanged = Object.hashAll(widget.model.lines) != _docSig;
+    if (!mounted || _batching) return;
+    final sig = Object.hashAll(widget.model.lines);
+    final textChanged = sig != _docSig;
     setState(() {
-      _recompute();
-      // A selection only makes sense for the text it was made on.
+      _recompute(sig);
       if (textChanged) {
         _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
       }
@@ -282,8 +313,8 @@ class _CodeViewState extends State<CodeView> {
     if (_matchIdx < 0 || _matchIdx >= _matches.length) return;
     final (r, col) = _matches[_matchIdx];
     final len = _findCtl.text.length;
-    widget.model.document
-        .replaceRange(TextPosition(r, col), TextPosition(r, col + len), _replCtl.text);
+    widget.model.document.replaceRange(
+        TextPosition(r, col), TextPosition(r, col + len), _replCtl.text);
     setState(_computeMatches);
     _goToMatch();
     HapticFeedback.selectionClick();
@@ -293,15 +324,27 @@ class _CodeViewState extends State<CodeView> {
     if (_matches.isEmpty) return;
     final len = _findCtl.text.length;
     final doc = widget.model.document;
-    // Back to front so earlier positions stay valid.
-    for (final (r, col) in _matches.reversed) {
-      doc.replaceRange(TextPosition(r, col), TextPosition(r, col + len), _replCtl.text);
+    final todo = List<(int, int)>.of(_matches);
+    // One recompute at the end instead of one per replacement.
+    _batching = true;
+    try {
+      for (final (r, col) in todo.reversed) {
+        doc.replaceRange(
+            TextPosition(r, col), TextPosition(r, col + len), _replCtl.text);
+      }
+    } finally {
+      _batching = false;
     }
-    setState(_computeMatches);
+    setState(() {
+      _selectionStart = _selectionEnd = null;
+      _recompute();
+    });
+    _inputClient.syncToIme();
     HapticFeedback.mediumImpact();
   }
 
   void _toggleFind() {
+    final closing = _findOpen;
     setState(() {
       _findOpen = !_findOpen;
       if (_findOpen) {
@@ -316,6 +359,12 @@ class _CodeViewState extends State<CodeView> {
         _replaceOpen = false;
       }
     });
+    if (closing) {
+      // The find TextField owned the keyboard; hand it back to the editor.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _inputClient.attach();
+      });
+    }
   }
 
   // ---- go to line ---------------------------------------------------------
@@ -354,6 +403,8 @@ class _CodeViewState extends State<CodeView> {
         ],
       ),
     );
+    // Dispose after the dialog's exit animation has finished.
+    Future<void>.delayed(const Duration(milliseconds: 400), ctl.dispose);
     if (res == null || !mounted || total == 0) return;
     final r = (res - 1).clamp(0, total - 1);
     setState(() => _selectionStart = _selectionEnd = null);
@@ -363,7 +414,6 @@ class _CodeViewState extends State<CodeView> {
 
   // ---- scopes / brackets --------------------------------------------------
 
-  /// Enclosing indentation scopes of [row], outermost first (cached).
   List<int> _scopes(int row) {
     final cached = _scopeCache[row];
     if (cached != null) return cached;
@@ -391,9 +441,8 @@ class _CodeViewState extends State<CodeView> {
     return t.length > 28 ? '${t.substring(0, 28)}…' : t;
   }
 
-  (TextPosition, TextPosition)? _findBracketPair() {
+  (TextPosition, TextPosition)? _findBracketPair(List<String> lines) {
     const open = '([{', close = ')]}';
-    final lines = widget.model.lines;
     final m = widget.model;
     if (m.row >= lines.length) return null;
     final line = lines[m.row];
@@ -475,7 +524,6 @@ class _CodeViewState extends State<CodeView> {
     final m = widget.model;
     final top = _vIndexOf(m.row) * _lineH;
     final vp = _v.position;
-    // Keep the caret below the sticky scope header (one line per stuck scope).
     final stickyH = _scopes(m.row).length * _lineH;
     if (top - stickyH < vp.pixels) {
       _v.jumpTo((top - stickyH).clamp(0.0, vp.maxScrollExtent));
@@ -510,9 +558,12 @@ class _CodeViewState extends State<CodeView> {
     return swap ? (b, a) : (a, b);
   }
 
-  void _clearSelection() => setState(() {
-        _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
-      });
+  void _clearSelection() {
+    setState(() {
+      _selectionStart = _selectionEnd = _magnifierPos = _dragAnchor = null;
+    });
+    _inputClient.syncToIme();
+  }
 
   void _selectWordAt(int row, int col) {
     final line = widget.model.lines[row];
@@ -528,6 +579,7 @@ class _CodeViewState extends State<CodeView> {
       _selectionStart = TextPosition(row, start);
       _selectionEnd = TextPosition(row, end);
     });
+    _syncIme();
   }
 
   void _selectLine(int row) {
@@ -536,6 +588,7 @@ class _CodeViewState extends State<CodeView> {
       _selectionStart = TextPosition(row, 0);
       _selectionEnd = TextPosition(row, len);
     });
+    _syncIme();
   }
 
   String _getSelectedText() {
@@ -562,12 +615,13 @@ class _CodeViewState extends State<CodeView> {
     await _copySelection();
     widget.model.document.deleteRange(s, e);
     _clearSelection();
+    _setCaret(s);
   }
 
   Future<void> _pasteText() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
-    if (text == null) return;
+    if (text == null || text.isEmpty) return;
     if (_hasSelection) {
       final (s, e) = _norm();
       widget.model.document.replaceRange(s, e, text);
@@ -575,6 +629,7 @@ class _CodeViewState extends State<CodeView> {
     } else {
       widget.model.insert(text);
     }
+    _inputClient.syncToIme();
   }
 
   void _selectAll() {
@@ -584,11 +639,52 @@ class _CodeViewState extends State<CodeView> {
       _selectionStart = const TextPosition(0, 0);
       _selectionEnd = TextPosition(lines.length - 1, lines.last.length);
     });
+    _syncIme();
+  }
+
+  // ---- hardware keyboard --------------------------------------------------
+  // Only shortcuts here. Backspace / Delete / arrows / Enter come through the
+  // IME as deltas; handling them here too would apply them twice.
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    final hw = HardwareKeyboard.instance;
+    final ctrl = hw.isControlPressed || hw.isMetaPressed;
+    if (k == LogicalKeyboardKey.escape) {
+      if (_findOpen) {
+        _toggleFind();
+        return KeyEventResult.handled;
+      }
+      if (_hasSelection) {
+        _clearSelection();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+    if (!ctrl) return KeyEventResult.ignored;
+    if (k == LogicalKeyboardKey.keyC) {
+      _copySelection();
+    } else if (k == LogicalKeyboardKey.keyX) {
+      _cutSelection();
+    } else if (k == LogicalKeyboardKey.keyV) {
+      _pasteText();
+    } else if (k == LogicalKeyboardKey.keyA) {
+      _selectAll();
+    } else if (k == LogicalKeyboardKey.keyF) {
+      if (!_findOpen) _toggleFind();
+    } else if (k == LogicalKeyboardKey.keyG) {
+      _goToLine();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
   }
 
   // ---- gestures -----------------------------------------------------------
 
   void _onTapUp(TapUpDetails d) {
+    _focus.requestFocus();
     _inputClient.attach();
     final now = DateTime.now();
     final isDouble = now.difference(_lastTapAt) < const Duration(milliseconds: 300) &&
@@ -599,7 +695,6 @@ class _CodeViewState extends State<CodeView> {
     if (_count == 0) return;
     final p = _posFromLocal(d.localPosition);
 
-    // Gutter: tap a line number to select the whole line.
     if (d.localPosition.dx < _codeLeft - 8) {
       _selectLine(p.row);
       HapticFeedback.selectionClick();
@@ -634,7 +729,6 @@ class _CodeViewState extends State<CodeView> {
     final before = pos.row < _wordStart.row ||
         (pos.row == _wordStart.row && pos.col < _wordStart.col);
     setState(() {
-      // Extend from the originally selected word in either direction.
       if (before) {
         _selectionStart = pos;
         _selectionEnd = _wordEnd;
@@ -668,21 +762,30 @@ class _CodeViewState extends State<CodeView> {
           }();
     final name = m.fileName;
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
-    return Column(
-      children: [
-        _Breadcrumb(
-          file: name.isEmpty ? 'untitled' : name,
-          scopes: [for (final r in _scopes(m.row)) _scopeLabel(r)],
-          findOpen: _findOpen,
-          onFind: _toggleFind,
+    return Focus(
+      focusNode: _focus,
+      onKeyEvent: _onKey,
+      child: Semantics(
+        label: 'Code editor, ${name.isEmpty ? 'untitled' : name}',
+        textField: true,
+        multiline: true,
+        child: Column(
+          children: [
+            _Breadcrumb(
+              file: name.isEmpty ? 'untitled' : name,
+              scopes: [for (final r in _scopes(m.row)) _scopeLabel(r)],
+              findOpen: _findOpen,
+              onFind: _toggleFind,
+            ),
+            Expanded(child: _buildEditor(context)),
+            _StatusBar(
+              left: 'Ln ${m.row + 1}, Col ${m.col + 1}$sel',
+              right: 'Spaces: $_indent   UTF-8   LF   ${_langs[ext] ?? 'Plain Text'}',
+              onTapLeft: _goToLine,
+            ),
+          ],
         ),
-        Expanded(child: _buildEditor(context)),
-        _StatusBar(
-          left: 'Ln ${m.row + 1}, Col ${m.col + 1}$sel',
-          right: 'Spaces: 2   UTF-8   LF   ${_langs[ext] ?? 'Plain Text'}',
-          onTapLeft: _goToLine,
-        ),
-      ],
+      ),
     );
   }
 
@@ -698,36 +801,43 @@ class _CodeViewState extends State<CodeView> {
       fontFamily: s.fontFamily,
     );
     final charW = _measureCharW(baseStyle, fs);
-    final lines = widget.model.lines;
+    final lines = widget.model.lines; // read once, reused by every row
     final digits = max(3, lines.length.toString().length);
-    final gutterW = max(48.0, digits * charW + 36);
+    final gutterW = s.lineNumbers ? max(48.0, digits * charW + 36) : 28.0;
     _lineH = lineH;
     _charW = charW;
     _codeLeft = gutterW + 8;
-    _bracket = _hasSelection ? null : _findBracketPair();
+    _bracket = _hasSelection ? null : _findBracketPair(lines);
+
+    final diagByLine = <int, List<dynamic>>{};
+    for (final d in widget.model.diagnostics) {
+      (diagByLine[d.line as int] ??= []).add(d);
+    }
 
     final selection = _hasSelection ? _norm() : null;
     final caretRow = widget.model.row;
     final caretLeading =
         caretRow < lines.length ? (_wsRe.stringMatch(lines[caretRow])?.length ?? 0) : 0;
-    final activeGuide = max(0, caretLeading ~/ CodeView._indentUnit.toInt() - 1);
+    final activeGuide = max(0, caretLeading ~/ _indent - 1);
 
     return LayoutBuilder(builder: (context, box) {
       _viewport = box.biggest;
-      // Keyboard opened: keep the caret in view.
       if (_lastViewportH != null && box.maxHeight < _lastViewportH! - 40) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _ensureCaretVisible());
       }
       _lastViewportH = box.maxHeight;
       final contentW = max(_viewport.width, _codeLeft + (_longest + 6) * charW);
+      final showMinimap = s.minimap && _viewport.width >= 360;
 
       final editor = GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapUp: _onTapUp,
         onLongPressStart: _onLongPressStart,
         onLongPressMoveUpdate: _onLongPressMove,
-        onLongPressEnd: (_) => setState(() => _magnifierPos = null),
-        // Pin text scaling: charW is measured unscaled, so glyphs must be too.
+        onLongPressEnd: (_) {
+          setState(() => _magnifierPos = null);
+          _syncIme();
+        },
         child: MediaQuery.withNoTextScaling(
           child: ColoredBox(
             color: c.bg,
@@ -750,10 +860,10 @@ class _CodeViewState extends State<CodeView> {
                         controller: _v,
                         itemCount: _count,
                         itemExtent: lineH,
-                        // scroll past the last line, like desktop editors
                         padding: EdgeInsets.only(bottom: box.maxHeight * 0.4),
                         itemBuilder: (context, vIndex) => _buildRow(
                           context,
+                          lines,
                           _rowAt(vIndex),
                           c,
                           s,
@@ -763,6 +873,7 @@ class _CodeViewState extends State<CodeView> {
                           charW,
                           selection,
                           activeGuide,
+                          diagByLine,
                         ),
                       ),
                     ),
@@ -778,14 +889,13 @@ class _CodeViewState extends State<CodeView> {
         key: _stackKey,
         children: [
           Positioned.fill(child: editor),
-          // Overlays live in viewport coordinates and follow both scrolls.
           Positioned.fill(
             child: AnimatedBuilder(
               animation: Listenable.merge([_v, _h]),
               builder: (context, _) => _buildOverlays(c, s, lineH, charW),
             ),
           ),
-          if (_viewport.width >= 600)
+          if (showMinimap)
             Positioned(
               top: 0,
               bottom: 0,
@@ -806,7 +916,7 @@ class _CodeViewState extends State<CodeView> {
           if (_findOpen)
             Positioned(
               top: 8,
-              right: _viewport.width >= 600 ? 72 : 8,
+              right: showMinimap ? 72 : 8,
               child: _FindBar(
                 width: min(380.0, _viewport.width - 16),
                 controller: _findCtl,
@@ -838,17 +948,18 @@ class _CodeViewState extends State<CodeView> {
 
   Widget _buildRow(
     BuildContext context,
+    List<String> lines,
     int index,
     dynamic c,
-    dynamic s,
+    AppSettings s,
     TextStyle baseStyle,
     double gutterW,
     double lineH,
     double charW,
     (TextPosition, TextPosition)? selection,
     int activeGuide,
+    Map<int, List<dynamic>> diagByLine,
   ) {
-    final lines = widget.model.lines;
     final text = lines[index];
     final model = widget.model;
     final isCurrent = index == model.row;
@@ -856,14 +967,13 @@ class _CodeViewState extends State<CodeView> {
     final foldable = _foldStarts.contains(index);
     final folded = foldable && _folding.isLineFolded(index);
     final leading = _wsRe.stringMatch(text)?.length ?? 0;
-    final guides = leading ~/ CodeView._indentUnit.toInt();
+    final guides = leading ~/ _indent;
     final bracketCols = <int>[
       if (_bracket != null && _bracket!.$1.row == index) _bracket!.$1.col,
       if (_bracket != null && _bracket!.$2.row == index) _bracket!.$2.col,
     ];
-    final lineDiagnostics = model.diagnostics.where((d) => d.line == index).toList();
+    final lineDiagnostics = diagByLine[index] ?? const <dynamic>[];
 
-    // Selection rectangle for this row (none for a zero-width tail at col 0).
     double? selLeft, selWidth;
     if (selection != null && index >= selection.$1.row && index <= selection.$2.row) {
       final ns = selection.$1, ne = selection.$2;
@@ -890,7 +1000,6 @@ class _CodeViewState extends State<CodeView> {
                 ),
               ),
             ),
-          // Code layer
           Positioned(
             left: _codeLeft,
             top: 0,
@@ -900,7 +1009,7 @@ class _CodeViewState extends State<CodeView> {
               children: [
                 for (var i = 0; i < guides; i++)
                   Positioned(
-                    left: i * CodeView._indentUnit * charW,
+                    left: i * _indent * charW,
                     top: 0,
                     bottom: 0,
                     width: 1,
@@ -934,7 +1043,7 @@ class _CodeViewState extends State<CodeView> {
                   ),
                 for (final diag in lineDiagnostics)
                   Positioned(
-                    left: diag.col * charW,
+                    left: (diag.col as int) * charW,
                     bottom: 0,
                     width: max(charW * 3, 20.0),
                     height: 2,
@@ -992,7 +1101,6 @@ class _CodeViewState extends State<CodeView> {
               ],
             ),
           ),
-          // Pinned gutter: translated by the horizontal offset so it never scrolls away.
           Positioned(
             left: 0,
             top: 0,
@@ -1056,9 +1164,10 @@ class _CodeViewState extends State<CodeView> {
     );
   }
 
-  Widget _buildOverlays(dynamic c, dynamic s, double lineH, double charW) {
+  Widget _buildOverlays(dynamic c, AppSettings s, double lineH, double charW) {
     final suggestions = widget.model.suggestions;
     final m = widget.model;
+    final lines = m.lines;
     final children = <Widget>[];
 
     if (_vOff > 0 && _count > 0) {
@@ -1093,7 +1202,7 @@ class _CodeViewState extends State<CodeView> {
                             left: _codeLeft - _hOff,
                             top: 0,
                             child: Text.rich(
-                              highlightLine(m.lines[r], c, base, fileName: m.fileName),
+                              highlightLine(lines[r], c, base, fileName: m.fileName),
                               softWrap: false,
                             ),
                           ),
@@ -1127,7 +1236,6 @@ class _CodeViewState extends State<CodeView> {
       Widget? handle(TextPosition p, bool isStart) {
         final cx = _xOfCol(p.col);
         final y = _yOfRow(p.row) + lineH - 4;
-        // Hide handles that have been scrolled out of view (or under the gutter).
         if (y < 0 || y > _viewport.height || cx < _codeLeft - 6 || cx > _viewport.width + 6) {
           return null;
         }
@@ -1141,20 +1249,25 @@ class _CodeViewState extends State<CodeView> {
               final local = _globalToLocal(d.globalPosition);
               final pos = _posFromLocal(local.translate(0, -lineH * 0.9));
               setState(() {
-                // Anchor stays put, so dragging past the other handle just works.
                 _selectionStart = _dragAnchor ?? (isStart ? ne : ns);
                 _selectionEnd = pos;
                 _magnifierPos = local;
               });
             },
-            onPanEnd: (_) => setState(() {
-              _magnifierPos = null;
-              _dragAnchor = null;
-            }),
-            onPanCancel: () => setState(() {
-              _magnifierPos = null;
-              _dragAnchor = null;
-            }),
+            onPanEnd: (_) {
+              setState(() {
+                _magnifierPos = null;
+                _dragAnchor = null;
+              });
+              _syncIme();
+            },
+            onPanCancel: () {
+              setState(() {
+                _magnifierPos = null;
+                _dragAnchor = null;
+              });
+              _syncIme();
+            },
             child: SizedBox(
               width: 44,
               height: 44,
@@ -1172,7 +1285,6 @@ class _CodeViewState extends State<CodeView> {
       if (hs != null) children.add(hs);
       if (he != null) children.add(he);
 
-      // Toolbar: above selection, flip below if it would leave the viewport.
       var ty = _yOfRow(ns.row) - 46;
       if (ty < 4) ty = _yOfRow(ne.row) + lineH + 36;
       final tx = _xOfCol(ns.col)
@@ -1189,7 +1301,7 @@ class _CodeViewState extends State<CodeView> {
         ),
       ));
     } else if (suggestions.isNotEmpty) {
-      final popH = suggestions.length * 34.0 + 10;
+      final popH = suggestions.length * 42.0 + 10;
       final cy = _yOfRow(m.row);
       final below = cy + lineH + 4;
       final top = below + popH > _viewport.height ? cy - popH - 4 : below;
@@ -1199,7 +1311,10 @@ class _CodeViewState extends State<CodeView> {
         child: _Autocomplete(
           suggestions: suggestions,
           prefix: m.prefix,
-          onPick: m.applySuggestion,
+          onPick: (sg) {
+            m.applySuggestion(sg);
+            _inputClient.syncToIme();
+          },
           fontFamily: s.fontFamily,
         ),
       ));
@@ -1347,7 +1462,7 @@ class _Autocomplete extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   onTap: () => onPick(suggestions[i]),
                   child: Container(
-                    height: 32,
+                    height: 40, // bigger touch target
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     child: Row(
                       children: [
@@ -1366,8 +1481,6 @@ class _Autocomplete extends StatelessWidget {
     );
   }
 
-  /// Bold-highlights the typed prefix; falls back to plain text if the label
-  /// doesn't actually start with it (previously threw a RangeError).
   Widget _label(dynamic c, String label) {
     final plain = LatticeText.mono(13, color: c.text, fontFamily: fontFamily);
     final matches = prefix.isNotEmpty &&
@@ -1534,7 +1647,6 @@ class _StatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    // Readable on any accent: white on dark accents, near-black on light ones.
     final fg = ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
         ? Colors.white
         : const Color(0xFF0B0D10);
