@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/document.dart';
 import '../models/editor_model.dart';
@@ -19,9 +18,9 @@ import 'code_view.dart' show rowColToOffset, offsetToRowCol;
 class EditorInputClient with TextInputClient, DeltaTextInputClient {
   EditorInputClient({
     required this.model,
-    required this.setCaret,
+    void Function(int row, int col)? setCaret,
     required this.onEditingChanged,
-  });
+  }) : setCaret = setCaret ?? model.moveTo;
 
   final EditorModel model;
 
@@ -125,7 +124,20 @@ class EditorInputClient with TextInputClient, DeltaTextInputClient {
 
   @override
   void updateEditingValue(TextEditingValue value) {
-    // Unused: delta model delivers changes via updateEditingValueWithDeltas.
+    if (value.text != model.text) {
+      final lines = model.lines;
+      final endRow = lines.isEmpty ? 0 : lines.length - 1;
+      final endCol = lines.isEmpty ? 0 : lines[endRow].length;
+      model.document.replaceRange(
+        const TextPosition(0, 0),
+        TextPosition(endRow, endCol),
+        value.text,
+      );
+      final rc = offsetToRowCol(model.lines, value.selection.extentOffset);
+      setCaret(rc.$1, rc.$2);
+      _value = value;
+      onEditingChanged();
+    }
   }
 
   @override

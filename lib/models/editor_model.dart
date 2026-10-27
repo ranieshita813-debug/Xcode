@@ -167,6 +167,8 @@ class EditorModel extends ChangeNotifier {
     _doc.cursorPosition = TextPosition(targetRow, targetCol);
   }
 
+  void moveCaret(int row, int col) => moveTo(row, col);
+
   void updateState({List<String>? newLines, int? newRow, int? newCol, bool? isDirty}) {
     if (newLines != null) {
       _doc.setLinesDirectly(newLines);

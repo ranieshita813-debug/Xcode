@@ -811,7 +811,7 @@ class _CodeViewState extends State<CodeView> {
 
     final diagByLine = <int, List<dynamic>>{};
     for (final d in widget.model.diagnostics) {
-      (diagByLine[d.line as int] ??= []).add(d);
+      (diagByLine[d.line] ??= []).add(d);
     }
 
     final selection = _hasSelection ? _norm() : null;
