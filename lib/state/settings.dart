@@ -2,23 +2,24 @@ import 'package:flutter/material.dart';
 
 class AppSettings extends ChangeNotifier {
   static const List<String> availableFonts = [
+    'Iosevka',
     'IBM Plex Mono',
     'JetBrains Mono',
     'Fira Code',
     'Source Code Pro',
     'Inconsolata',
-    'Roboto Mono',
-    'Space Mono',
+    'Space Grotesk',
   ];
 
   ThemeMode themeMode = ThemeMode.dark;
-  String fontFamily = 'IBM Plex Mono';
-  double fontSize = 12;
+  String fontFamily = 'Iosevka';
+  double fontSize = 13;
   bool wordWrap = true;
   bool lineNumbers = true;
   bool autoSave = true;
   bool minimap = false;
   bool formatOnSave = true;
+  bool ligatures = true;
 
   void update(void Function(AppSettings s) change) {
     change(this);
