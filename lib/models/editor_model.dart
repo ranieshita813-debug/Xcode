@@ -113,9 +113,46 @@ class EditorModel extends ChangeNotifier {
     dirty = true;
   }
 
-  void backspace() {
+  void deleteSelection(TextPosition start, TextPosition end) {
+    _doc.deleteRange(start, end);
+    dirty = true;
+  }
+
+  void replaceSelection(TextPosition start, TextPosition end, String replacement) {
+    _doc.replaceRange(start, end, replacement);
+    dirty = true;
+  }
+
+  void backspace({TextPosition? selStart, TextPosition? selEnd}) {
+    if (selStart != null && selEnd != null && selStart != selEnd) {
+      deleteSelection(selStart, selEnd);
+      return;
+    }
+
     if (col == 0 && row == 0) return;
+
+    final line = currentLine;
+
+    // Auto-pair deletion: e.g. (|), [|], {|}, "|", '|'
+    if (col > 0 && col < line.length) {
+      final left = line[col - 1];
+      final right = line[col];
+      if (_autoPairs[left] == right) {
+        _doc.deleteRange(TextPosition(row, col - 1), TextPosition(row, col + 1));
+        dirty = true;
+        return;
+      }
+    }
+
+    // Soft tab indentation deletion
     if (col > 0) {
+      final prefix = line.substring(0, col);
+      if (prefix.trim().isEmpty) {
+        final deleteCount = (col % 2 == 0 && col >= 2) ? 2 : 1;
+        _doc.deleteRange(TextPosition(row, col - deleteCount), TextPosition(row, col));
+        dirty = true;
+        return;
+      }
       _doc.deleteRange(TextPosition(row, col - 1), TextPosition(row, col));
     } else if (row > 0) {
       final prevLen = lines[row - 1].length;
@@ -176,17 +213,22 @@ class EditorModel extends ChangeNotifier {
     final cur = currentLine;
     final safeCol = col.clamp(0, cur.length);
     final before = cur.substring(0, safeCol);
-    return RegExp(r'[A-Za-z_$][\w$]*$').stringMatch(before) ?? '';
+    return RegExp(r'(?:[\.\:\>\-])?[A-Za-z_$][\w$]*$').stringMatch(before) ?? '';
   }
 
   List<Suggestion> get suggestions {
-    final p = prefix;
-    if (p.length < 2) return const [];
-    final completions = lspService.getCompletions(fileName, text, row, col, p);
+    final rawPrefix = prefix;
+    if (rawPrefix.isEmpty) return const [];
+    final cleanPrefix = rawPrefix.replaceAll(RegExp(r'^[\.\:\>\-]+'), '');
+    if (cleanPrefix.isEmpty && !rawPrefix.contains('.')) return const [];
+
+    final completions = lspService.getCompletions(fileName, text, row, col, cleanPrefix);
     final results = completions.map((c) => Suggestion(c.label, c.kind)).toList();
 
     for (final s in kAllSuggestions) {
-      if (s.label.startsWith(p) && s.label != p && !results.any((r) => r.label == s.label)) {
+      if (s.label.toLowerCase().startsWith(cleanPrefix.toLowerCase()) &&
+          s.label != cleanPrefix &&
+          !results.any((r) => r.label == s.label)) {
         results.add(s);
       }
     }
@@ -194,8 +236,13 @@ class EditorModel extends ChangeNotifier {
   }
 
   void applySuggestion(Suggestion s) {
-    final p = prefix;
-    _doc.replaceRange(TextPosition(row, col - p.length), TextPosition(row, col), s.label);
+    final rawPrefix = prefix;
+    final cleanPrefix = rawPrefix.replaceAll(RegExp(r'^[\.\:\>\-]+'), '');
+    _doc.replaceRange(
+      TextPosition(row, col - cleanPrefix.length),
+      TextPosition(row, col),
+      s.label,
+    );
     dirty = true;
   }
 

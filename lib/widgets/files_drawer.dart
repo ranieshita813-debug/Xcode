@@ -119,15 +119,20 @@ class FilesDrawer extends StatefulWidget {
     required this.onOpenSettings,
     required this.onOpenSourceControl,
     this.openFiles = const [],
+    this.customFiles = const [],
+    this.customFolders = const [],
     this.projectName = 'lattice-app',
     this.branch = 'main',
     this.onNewFile,
     this.onNewFolder,
+    this.onNewProject,
   });
 
   final String activeFile;
   final int changeCount;
   final List<String> openFiles;
+  final List<String> customFiles;
+  final List<String> customFolders;
   final String projectName;
   final String branch;
   final ValueChanged<String> onOpenFile;
@@ -135,6 +140,7 @@ class FilesDrawer extends StatefulWidget {
   final VoidCallback onOpenSourceControl;
   final VoidCallback? onNewFile;
   final VoidCallback? onNewFolder;
+  final VoidCallback? onNewProject;
 
   @override
   State<FilesDrawer> createState() => _FilesDrawerState();
@@ -144,70 +150,85 @@ class _FilesDrawerState extends State<FilesDrawer> {
   final _q = TextEditingController();
   bool _editorsOpen = true;
   bool _projectOpen = true;
+
+  List<_Node> get _currentTree {
+    final list = List<_Node>.from(_tree);
+    for (final folder in widget.customFolders) {
+      if (!list.any((n) => n.name == folder)) {
+        list.add(_Node(folder, 0, folder: true, open: true));
+      }
+    }
+    for (final file in widget.customFiles) {
+      if (!list.any((n) => n.name == file)) {
+        list.add(_Node(file, 0));
+      }
+    }
+    return list;
+  }
+
   late final Set<int> _open = {
     for (var i = 0; i < _tree.length; i++)
       if (_tree[i].folder && _tree[i].open) i
   };
-  late final List<int?> _parent = _buildParents();
 
-  List<int?> _buildParents() {
+  List<int?> _buildParents(List<_Node> tree) {
     final stack = <int>[];
     final out = <int?>[];
-    for (var i = 0; i < _tree.length; i++) {
-      while (stack.isNotEmpty && _tree[stack.last].depth >= _tree[i].depth) {
+    for (var i = 0; i < tree.length; i++) {
+      while (stack.isNotEmpty && tree[stack.last].depth >= tree[i].depth) {
         stack.removeLast();
       }
       out.add(stack.isEmpty ? null : stack.last);
-      if (_tree[i].folder) stack.add(i);
+      if (tree[i].folder) stack.add(i);
     }
     return out;
   }
 
-  Iterable<int> _ancestors(int i) sync* {
-    var p = _parent[i];
+  Iterable<int> _ancestors(int i, List<int?> parentList) sync* {
+    var p = parentList[i];
     while (p != null) {
       yield p;
-      p = _parent[p];
+      p = parentList[p];
     }
   }
 
-  bool _dirty(int folder) {
+  bool _dirty(int folder, List<_Node> tree) {
     for (var i = folder + 1;
-        i < _tree.length && _tree[i].depth > _tree[folder].depth;
+        i < tree.length && tree[i].depth > tree[folder].depth;
         i++) {
-      if (_tree[i].status != null) return true;
+      if (tree[i].status != null) return true;
     }
     return false;
   }
 
-  String? _statusOf(String file) {
-    for (final n in _tree) {
+  String? _statusOf(String file, List<_Node> tree) {
+    for (final n in tree) {
       if (!n.folder && n.name == file) return n.status;
     }
     return null;
   }
 
-  List<int> _visible(String q) {
+  List<int> _visible(String q, List<_Node> tree, List<int?> parentList) {
     if (q.isEmpty) {
       return [
-        for (var i = 0; i < _tree.length; i++)
-          if (_ancestors(i).every(_open.contains)) i
+        for (var i = 0; i < tree.length; i++)
+          if (_ancestors(i, parentList).every(_open.contains)) i
       ];
     }
     final keep = <int>{};
-    for (var i = 0; i < _tree.length; i++) {
-      if (!_tree[i].folder && _tree[i].name.toLowerCase().contains(q)) {
+    for (var i = 0; i < tree.length; i++) {
+      if (!tree[i].folder && tree[i].name.toLowerCase().contains(q)) {
         keep.add(i);
-        keep.addAll(_ancestors(i));
+        keep.addAll(_ancestors(i, parentList));
       }
     }
     return keep.toList()..sort();
   }
 
   /// Indent-guide that lights up for the folder containing the active file.
-  Set<int> _activePathFolders() {
-    final i = _tree.indexWhere((n) => !n.folder && n.name == widget.activeFile);
-    return i < 0 ? {} : _ancestors(i).toSet();
+  Set<int> _activePathFolders(List<_Node> tree, List<int?> parentList) {
+    final i = tree.indexWhere((n) => !n.folder && n.name == widget.activeFile);
+    return i < 0 ? {} : _ancestors(i, parentList).toSet();
   }
 
   @override
@@ -219,9 +240,11 @@ class _FilesDrawerState extends State<FilesDrawer> {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final currentTree = _currentTree;
+    final parentList = _buildParents(currentTree);
     final q = _q.text.trim().toLowerCase();
-    final rows = _visible(q);
-    final activeFolders = _activePathFolders();
+    final rows = _visible(q, currentTree, parentList);
+    final activeFolders = _activePathFolders(currentTree, parentList);
     final width = min(316.0, MediaQuery.of(context).size.width * 0.86);
     final showEditors = widget.openFiles.isNotEmpty && q.isEmpty;
 
@@ -336,7 +359,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
                               _OpenEditorRow(
                                 name: f,
                                 active: f == widget.activeFile,
-                                status: _statusOf(f),
+                                status: _statusOf(f, currentTree),
                                 onTap: () => widget.onOpenFile(f),
                               ),
                         ],
@@ -356,6 +379,13 @@ class _FilesDrawerState extends State<FilesDrawer> {
                                   color: c.textMuted, width: 16, height: 16),
                               onTap: widget.onNewFolder ?? () {},
                             ),
+                            if (widget.onNewProject != null)
+                              _HeaderAction(
+                                tooltip: 'New project',
+                                icon: iconoir.PlusCircle(
+                                    color: c.textMuted, width: 16, height: 16),
+                                onTap: widget.onNewProject!,
+                              ),
                           ],
                           onTap: () =>
                               setState(() => _projectOpen = !_projectOpen),
@@ -363,19 +393,19 @@ class _FilesDrawerState extends State<FilesDrawer> {
                         if (_projectOpen || q.isNotEmpty)
                           for (final i in rows)
                             _TreeRow(
-                              node: _tree[i],
-                              active: !_tree[i].folder &&
-                                  _tree[i].name == widget.activeFile,
+                              node: currentTree[i],
+                              active: !currentTree[i].folder &&
+                                  currentTree[i].name == widget.activeFile,
                               expanded: q.isNotEmpty || _open.contains(i),
-                              dirty: _tree[i].folder && _dirty(i),
+                              dirty: currentTree[i].folder && _dirty(i, currentTree),
                               query: q,
                               guideFolders: activeFolders,
-                              ancestors: _ancestors(i).toList(),
-                              onTap: _tree[i].folder
+                              ancestors: _ancestors(i, parentList).toList(),
+                              onTap: currentTree[i].folder
                                   ? () => setState(() {
                                         if (!_open.remove(i)) _open.add(i);
                                       })
-                                  : () => widget.onOpenFile(_tree[i].name),
+                                  : () => widget.onOpenFile(currentTree[i].name),
                             ),
                       ],
                     ),

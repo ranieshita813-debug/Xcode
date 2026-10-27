@@ -69,10 +69,18 @@ class LspService {
       LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword', documentation: 'Imports exports from another module.'),
       LspCompletion(label: 'export', kind: 'keyword', detail: 'keyword', documentation: 'Exports a member from the module.'),
       LspCompletion(label: 'return', kind: 'keyword', detail: 'keyword', documentation: 'Returns a value from a function.'),
+      LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword', documentation: 'Defines an asynchronous function.'),
+      LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword', documentation: 'Awaits completion of a Promise.'),
       LspCompletion(label: 'useState', kind: 'function', detail: '(initialState) => [state, setState]', documentation: 'React hook for local state management.'),
       LspCompletion(label: 'useEffect', kind: 'function', detail: '(effect, deps) => void', documentation: 'React hook for side effects.'),
       LspCompletion(label: 'setDirty', kind: 'function', detail: '(value: boolean) => void', documentation: 'Sets the dirty state of the editor.'),
       LspCompletion(label: 'saveFile', kind: 'function', detail: '(path: string, content: string) => Promise<void>', documentation: 'Saves file to disk.'),
+      LspCompletion(label: 'log', kind: 'method', detail: 'console.log(...data)', documentation: 'Logs to output stream.'),
+      LspCompletion(label: 'map', kind: 'method', detail: 'Array.map(callback)', documentation: 'Transforms array elements.'),
+      LspCompletion(label: 'filter', kind: 'method', detail: 'Array.filter(predicate)', documentation: 'Filters array elements.'),
+      LspCompletion(label: 'forEach', kind: 'method', detail: 'Array.forEach(callback)', documentation: 'Iterates over array elements.'),
+      LspCompletion(label: 'includes', kind: 'method', detail: 'Array/String.includes(element)', documentation: 'Checks presence.'),
+      LspCompletion(label: 'length', kind: 'property', detail: 'number', documentation: 'Gets string/array length.'),
     ],
     'javascript': [
       LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword'),
@@ -80,10 +88,16 @@ class LspService {
       LspCompletion(label: 'function', kind: 'keyword', detail: 'keyword'),
       LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword'),
       LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'console.log', kind: 'function', detail: 'console.log(...)'),
+      LspCompletion(label: 'log', kind: 'method', detail: 'console.log(...)'),
+      LspCompletion(label: 'map', kind: 'method', detail: 'Array.map(...)'),
+      LspCompletion(label: 'filter', kind: 'method', detail: 'Array.filter(...)'),
+      LspCompletion(label: 'length', kind: 'property', detail: 'number'),
     ],
     'dart': [
       LspCompletion(label: 'void', kind: 'keyword', detail: 'type'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'final', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword'),
       LspCompletion(label: 'main', kind: 'function', detail: 'void main()', documentation: 'Entry point for Dart applications.'),
       LspCompletion(label: 'runApp', kind: 'function', detail: 'void runApp(Widget app)', documentation: 'Inflates the given widget and attaches it to the screen.'),
       LspCompletion(label: 'Widget', kind: 'class', detail: 'class Widget'),
@@ -91,6 +105,9 @@ class LspService {
       LspCompletion(label: 'StatefulWidget', kind: 'class', detail: 'abstract class StatefulWidget'),
       LspCompletion(label: 'setState', kind: 'function', detail: 'void setState(VoidCallback fn)'),
       LspCompletion(label: 'print', kind: 'function', detail: 'void print(Object? object)'),
+      LspCompletion(label: 'toString', kind: 'method', detail: 'String toString()'),
+      LspCompletion(label: 'add', kind: 'method', detail: 'void add(element)'),
+      LspCompletion(label: 'length', kind: 'property', detail: 'int'),
     ],
     'python': [
       LspCompletion(label: 'def', kind: 'keyword', detail: 'keyword', documentation: 'Defines a function.'),
@@ -99,6 +116,9 @@ class LspService {
       LspCompletion(label: 'return', kind: 'keyword', detail: 'keyword'),
       LspCompletion(label: 'print', kind: 'function', detail: 'print(*values)', documentation: 'Prints values to stream.'),
       LspCompletion(label: 'calculate_sum', kind: 'function', detail: '(a: int, b: int) -> int'),
+      LspCompletion(label: 'append', kind: 'method', detail: 'list.append(x)'),
+      LspCompletion(label: 'split', kind: 'method', detail: 'str.split(sep=None)'),
+      LspCompletion(label: 'join', kind: 'method', detail: 'str.join(iterable)'),
     ],
     'cpp': [
       LspCompletion(label: '#include', kind: 'keyword', detail: 'preprocessor directive'),
@@ -107,6 +127,9 @@ class LspService {
       LspCompletion(label: 'std::cout', kind: 'variable', detail: 'std::ostream', documentation: 'Standard output stream.'),
       LspCompletion(label: 'std::endl', kind: 'constant', detail: 'manipulator'),
       LspCompletion(label: 'std::string', kind: 'type', detail: 'type'),
+      LspCompletion(label: 'cout', kind: 'variable', detail: 'std::ostream'),
+      LspCompletion(label: 'endl', kind: 'constant', detail: 'manipulator'),
+      LspCompletion(label: 'push_back', kind: 'method', detail: 'vector.push_back(val)'),
     ],
     'kotlin': [
       LspCompletion(label: 'fun', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function.'),
@@ -115,6 +138,7 @@ class LspService {
       LspCompletion(label: 'package', kind: 'keyword', detail: 'keyword'),
       LspCompletion(label: 'println', kind: 'function', detail: 'println(message: Any?)'),
       LspCompletion(label: 'greetUser', kind: 'function', detail: '(name: String): String'),
+      LspCompletion(label: 'forEach', kind: 'method', detail: 'Iterable.forEach(action)'),
     ],
   };
 
@@ -152,6 +176,10 @@ class LspService {
     final lines = content.split('\n');
     final lang = detectLanguage(fileName);
 
+    var openParen = 0;
+    var openBrace = 0;
+    var openBracket = 0;
+
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
 
@@ -171,12 +199,14 @@ class LspService {
         }
       }
 
-      // Check for unmatched closing brackets/parens/braces
-      var openParen = 0;
       for (var col = 0; col < line.length; col++) {
         final ch = line[col];
         if (ch == '(') openParen++;
         if (ch == ')') openParen--;
+        if (ch == '{') openBrace++;
+        if (ch == '}') openBrace--;
+        if (ch == '[') openBracket++;
+        if (ch == ']') openBracket--;
 
         if (openParen < 0) {
           diagnostics.add(LspDiagnostic(
@@ -188,6 +218,28 @@ class LspService {
             source: 'LSP Parser',
           ));
           openParen = 0;
+        }
+        if (openBrace < 0) {
+          diagnostics.add(LspDiagnostic(
+            fileName: fileName,
+            line: i,
+            col: col,
+            message: "Unmatched closing brace '}'",
+            severity: DiagnosticSeverity.error,
+            source: 'LSP Parser',
+          ));
+          openBrace = 0;
+        }
+        if (openBracket < 0) {
+          diagnostics.add(LspDiagnostic(
+            fileName: fileName,
+            line: i,
+            col: col,
+            message: "Unmatched closing bracket ']'",
+            severity: DiagnosticSeverity.error,
+            source: 'LSP Parser',
+          ));
+          openBracket = 0;
         }
       }
     }
