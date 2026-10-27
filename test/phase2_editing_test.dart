@@ -10,7 +10,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Phase 2 Editing Quality', () {
-    test('auto-closes opening brackets and quotes', () {
+    test('auto-closes opening brackets and quotes, and backspace removes pairs', () {
       final model = EditorModel(lines: ['']);
       model.insert('(');
       expect(model.text, equals('()'));
@@ -19,6 +19,34 @@ void main() {
       model.insert('[');
       expect(model.text, equals('([])'));
       expect(model.col, equals(2));
+
+      model.backspace();
+      expect(model.text, equals('()'));
+      expect(model.col, equals(1));
+
+      model.backspace();
+      expect(model.text, equals(''));
+      expect(model.col, equals(0));
+    });
+
+    test('EditorInputClient delta deletion handles ranges correctly', () {
+      final model = EditorModel(lines: ['hello world']);
+      final client = EditorInputClient(
+        model: model,
+        onEditingChanged: () {},
+      );
+
+      client.updateEditingValueWithDeltas([
+        const TextEditingDeltaDeletion(
+          oldText: 'hello world',
+          deletedRange: TextRange(start: 5, end: 11),
+          selection: TextSelection.collapsed(offset: 5),
+          composing: TextRange.empty,
+        ),
+      ]);
+
+      expect(model.text, equals('hello'));
+      expect(model.col, equals(5));
     });
 
     test('SearchModel finds matches with regex and performs replace', () {

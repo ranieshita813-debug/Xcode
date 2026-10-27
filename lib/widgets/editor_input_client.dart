@@ -102,33 +102,33 @@ class EditorInputClient implements DeltaTextInputClient {
 
     for (final delta in deltas) {
       if (delta is TextEditingDeltaInsertion) {
-        final insertOffset = delta.insertionOffset;
+        final insertOffset = delta.insertionOffset.clamp(0, newText.length);
         final inserted = delta.textInserted;
         newText = newText.replaceRange(insertOffset, insertOffset, inserted);
         selectionStart = insertOffset + inserted.length;
         newComposing = delta.composing;
         hasTextChanges = true;
       } else if (delta is TextEditingDeltaDeletion) {
-        final start = delta.deletedRange.start;
-        final end = delta.deletedRange.end;
-        if (start >= 0 && end <= newText.length && start < end) {
+        final start = delta.deletedRange.start.clamp(0, newText.length);
+        final end = delta.deletedRange.end.clamp(0, newText.length);
+        if (start < end) {
           newText = newText.replaceRange(start, end, '');
           selectionStart = start;
         }
         newComposing = delta.composing;
         hasTextChanges = true;
       } else if (delta is TextEditingDeltaReplacement) {
-        final start = delta.replacedRange.start;
-        final end = delta.replacedRange.end;
+        final start = delta.replacedRange.start.clamp(0, newText.length);
+        final end = delta.replacedRange.end.clamp(0, newText.length);
         final replacement = delta.replacementText;
-        if (start >= 0 && end <= newText.length && start <= end) {
+        if (start <= end) {
           newText = newText.replaceRange(start, end, replacement);
           selectionStart = start + replacement.length;
         }
         newComposing = delta.composing;
         hasTextChanges = true;
       } else if (delta is TextEditingDeltaNonTextUpdate) {
-        selectionStart = delta.selection.start;
+        selectionStart = delta.selection.start.clamp(0, newText.length);
         newComposing = delta.composing;
       }
     }
@@ -136,7 +136,8 @@ class EditorInputClient implements DeltaTextInputClient {
     _composing = newComposing;
 
     final lines = newText.split('\n');
-    final (row, col) = _offsetToRowCol(lines, selectionStart);
+    final safeOffset = selectionStart.clamp(0, newText.length);
+    final (row, col) = _offsetToRowCol(lines, safeOffset);
 
     if (hasTextChanges) {
       const oldPosStart = TextPosition(0, 0);

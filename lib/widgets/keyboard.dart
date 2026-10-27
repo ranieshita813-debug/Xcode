@@ -52,12 +52,12 @@ class _KeyCap extends StatelessWidget {
   }
 }
 
-/// Row of code-friendly keys above the mobile keyboard: Tab { } ( ) ; " ← →
+/// Row of code-friendly keys above the mobile keyboard: Tab { } ( ) ; " ← → ⌫
 class ExtraKeys extends StatelessWidget {
   const ExtraKeys({super.key, required this.onKey});
   final KeyHandler onKey;
 
-  static const _keys = ['{', '}', '(', ')', ';', '"', '←', '→'];
+  static const _keys = ['{', '}', '(', ')', ';', '"', '←', '→', '⌫'];
 
   @override
   Widget build(BuildContext context) {
@@ -72,28 +72,30 @@ class ExtraKeys extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 50,
+            width: 44,
             child: _KeyCap(
               label: 'Tab',
               height: 32,
               radius: 8,
-              fontSize: 13,
+              fontSize: 12,
               onTap: () => onKey(Keys.tab),
             ),
           ),
           for (final k in _keys) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
             Expanded(
               child: _KeyCap(
                 label: k,
                 height: 32,
                 radius: 8,
-                fontSize: 15,
+                fontSize: 14,
                 onTap: () => onKey(k == '←'
                     ? Keys.left
                     : k == '→'
                         ? Keys.right
-                        : k),
+                        : k == '⌫'
+                            ? Keys.backspace
+                            : k),
               ),
             ),
           ],

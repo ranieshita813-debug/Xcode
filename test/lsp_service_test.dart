@@ -17,6 +17,26 @@ void main() {
       expect(lspService.detectLanguage('app.py'), 'python');
       expect(lspService.detectLanguage('native.cpp'), 'cpp');
       expect(lspService.detectLanguage('Helper.kt'), 'kotlin');
+      expect(lspService.detectLanguage('App.java'), 'java');
+      expect(lspService.detectLanguage('main.go'), 'go');
+      expect(lspService.detectLanguage('lib.rs'), 'rust');
+      expect(lspService.detectLanguage('config.json'), 'json');
+      expect(lspService.detectLanguage('deploy.yaml'), 'yaml');
+      expect(lspService.detectLanguage('script.sh'), 'shell');
+    });
+
+    test('analyze detects missing python colon', () {
+      const code = 'def test()\n    return 1';
+      final diagnostics = lspService.analyze('app.py', code);
+
+      expect(diagnostics.any((d) => d.message.contains("Expected ':'")), isTrue);
+    });
+
+    test('analyze detects json syntax errors', () {
+      const code = '{\n  "name": "lattice"\n}}';
+      final diagnostics = lspService.analyze('config.json', code);
+
+      expect(diagnostics.any((d) => d.message.contains('Unmatched') || d.message.contains('closing')), isTrue);
     });
 
     test('analyze detects TS2304 error for setD in TypeScript', () {

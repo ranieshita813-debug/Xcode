@@ -65,56 +65,180 @@ class LspService {
     'typescript': [
       LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword', documentation: 'Declares a read-only named constant.'),
       LspCompletion(label: 'let', kind: 'keyword', detail: 'keyword', documentation: 'Declares a reassignable block-scoped variable.'),
+      LspCompletion(label: 'var', kind: 'keyword', detail: 'keyword', documentation: 'Declares a variable.'),
       LspCompletion(label: 'function', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function.'),
       LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword', documentation: 'Imports exports from another module.'),
       LspCompletion(label: 'export', kind: 'keyword', detail: 'keyword', documentation: 'Exports a member from the module.'),
       LspCompletion(label: 'return', kind: 'keyword', detail: 'keyword', documentation: 'Returns a value from a function.'),
+      LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword', documentation: 'Marks a function as asynchronous.'),
+      LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword', documentation: 'Pauses execution until a promise resolves.'),
+      LspCompletion(label: 'interface', kind: 'keyword', detail: 'keyword', documentation: 'Declares a TypeScript interface.'),
+      LspCompletion(label: 'type', kind: 'keyword', detail: 'keyword', documentation: 'Declares a type alias.'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword', documentation: 'Declares a class.'),
       LspCompletion(label: 'useState', kind: 'function', detail: '(initialState) => [state, setState]', documentation: 'React hook for local state management.'),
       LspCompletion(label: 'useEffect', kind: 'function', detail: '(effect, deps) => void', documentation: 'React hook for side effects.'),
+      LspCompletion(label: 'useCallback', kind: 'function', detail: '(fn, deps) => callback', documentation: 'React hook to memoize callbacks.'),
+      LspCompletion(label: 'useMemo', kind: 'function', detail: '(factory, deps) => value', documentation: 'React hook to memoize computed values.'),
       LspCompletion(label: 'setDirty', kind: 'function', detail: '(value: boolean) => void', documentation: 'Sets the dirty state of the editor.'),
       LspCompletion(label: 'saveFile', kind: 'function', detail: '(path: string, content: string) => Promise<void>', documentation: 'Saves file to disk.'),
+      LspCompletion(label: 'console.log', kind: 'function', detail: '(message?: any, ...optionalParams: any[]) => void', documentation: 'Prints to console.'),
+      LspCompletion(label: 'Promise', kind: 'class', detail: 'class Promise<T>', documentation: 'Represents asynchronous operations.'),
     ],
     'javascript': [
-      LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'let', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'function', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'console.log', kind: 'function', detail: 'console.log(...)'),
+      LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword', documentation: 'Declares a constant variable.'),
+      LspCompletion(label: 'let', kind: 'keyword', detail: 'keyword', documentation: 'Declares a block variable.'),
+      LspCompletion(label: 'var', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function-scoped variable.'),
+      LspCompletion(label: 'function', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function.'),
+      LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword', documentation: 'Asynchronous function specifier.'),
+      LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword', documentation: 'Await promise resolution.'),
+      LspCompletion(label: 'return', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'export', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'console.log', kind: 'function', detail: 'console.log(...)', documentation: 'Outputs message to console.'),
+      LspCompletion(label: 'setTimeout', kind: 'function', detail: '(handler, timeout) => number', documentation: 'Schedules timer execution.'),
+      LspCompletion(label: 'setInterval', kind: 'function', detail: '(handler, timeout) => number', documentation: 'Schedules repeated timer execution.'),
     ],
     'dart': [
-      LspCompletion(label: 'void', kind: 'keyword', detail: 'type'),
+      LspCompletion(label: 'void', kind: 'keyword', detail: 'type', documentation: 'Return type indicating no value.'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword', documentation: 'Declares a class.'),
+      LspCompletion(label: 'final', kind: 'keyword', detail: 'keyword', documentation: 'Immutable variable modifier.'),
+      LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword', documentation: 'Compile-time constant modifier.'),
+      LspCompletion(label: 'var', kind: 'keyword', detail: 'keyword', documentation: 'Type-inferred variable.'),
+      LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword', documentation: 'Asynchronous method modifier.'),
+      LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword', documentation: 'Await Future completion.'),
+      LspCompletion(label: 'Future', kind: 'class', detail: 'class Future<T>', documentation: 'Computation producing a value asynchronously.'),
+      LspCompletion(label: 'Stream', kind: 'class', detail: 'class Stream<T>', documentation: 'Source of asynchronous data events.'),
       LspCompletion(label: 'main', kind: 'function', detail: 'void main()', documentation: 'Entry point for Dart applications.'),
       LspCompletion(label: 'runApp', kind: 'function', detail: 'void runApp(Widget app)', documentation: 'Inflates the given widget and attaches it to the screen.'),
-      LspCompletion(label: 'Widget', kind: 'class', detail: 'class Widget'),
-      LspCompletion(label: 'StatelessWidget', kind: 'class', detail: 'abstract class StatelessWidget'),
-      LspCompletion(label: 'StatefulWidget', kind: 'class', detail: 'abstract class StatefulWidget'),
-      LspCompletion(label: 'setState', kind: 'function', detail: 'void setState(VoidCallback fn)'),
-      LspCompletion(label: 'print', kind: 'function', detail: 'void print(Object? object)'),
+      LspCompletion(label: 'Widget', kind: 'class', detail: 'class Widget', documentation: 'Describes part of the UI.'),
+      LspCompletion(label: 'StatelessWidget', kind: 'class', detail: 'abstract class StatelessWidget', documentation: 'Widget that does not require mutable state.'),
+      LspCompletion(label: 'StatefulWidget', kind: 'class', detail: 'abstract class StatefulWidget', documentation: 'Widget that has mutable state.'),
+      LspCompletion(label: 'State', kind: 'class', detail: 'abstract class State<T extends StatefulWidget>'),
+      LspCompletion(label: 'setState', kind: 'function', detail: 'void setState(VoidCallback fn)', documentation: 'Notifies framework that internal state changed.'),
+      LspCompletion(label: 'BuildContext', kind: 'class', detail: 'abstract class BuildContext'),
+      LspCompletion(label: 'print', kind: 'function', detail: 'void print(Object? object)', documentation: 'Prints string representation to console.'),
     ],
     'python': [
       LspCompletion(label: 'def', kind: 'keyword', detail: 'keyword', documentation: 'Defines a function.'),
       LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword', documentation: 'Defines a class.'),
-      LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'return', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'print', kind: 'function', detail: 'print(*values)', documentation: 'Prints values to stream.'),
+      LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword', documentation: 'Imports a module.'),
+      LspCompletion(label: 'from', kind: 'keyword', detail: 'keyword', documentation: 'Imports specific attributes from a module.'),
+      LspCompletion(label: 'return', kind: 'keyword', detail: 'keyword', documentation: 'Returns value from function.'),
+      LspCompletion(label: 'if', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'elif', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'else', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'for', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'while', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'try', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'except', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'async', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'await', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'print', kind: 'function', detail: 'print(*values)', documentation: 'Prints values to output stream.'),
+      LspCompletion(label: 'len', kind: 'function', detail: 'len(s)', documentation: 'Returns length of an object.'),
+      LspCompletion(label: 'range', kind: 'function', detail: 'range(stop)', documentation: 'Returns sequence of numbers.'),
       LspCompletion(label: 'calculate_sum', kind: 'function', detail: '(a: int, b: int) -> int'),
     ],
     'cpp': [
-      LspCompletion(label: '#include', kind: 'keyword', detail: 'preprocessor directive'),
-      LspCompletion(label: 'int', kind: 'type', detail: 'type'),
-      LspCompletion(label: 'main', kind: 'function', detail: 'int main()'),
+      LspCompletion(label: '#include', kind: 'keyword', detail: 'preprocessor directive', documentation: 'Includes standard or header file.'),
+      LspCompletion(label: '#define', kind: 'keyword', detail: 'preprocessor directive'),
+      LspCompletion(label: 'int', kind: 'type', detail: 'built-in type'),
+      LspCompletion(label: 'double', kind: 'type', detail: 'built-in type'),
+      LspCompletion(label: 'float', kind: 'type', detail: 'built-in type'),
+      LspCompletion(label: 'bool', kind: 'type', detail: 'built-in type'),
+      LspCompletion(label: 'void', kind: 'type', detail: 'built-in type'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'struct', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'template', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'main', kind: 'function', detail: 'int main()', documentation: 'Application entry point.'),
       LspCompletion(label: 'std::cout', kind: 'variable', detail: 'std::ostream', documentation: 'Standard output stream.'),
-      LspCompletion(label: 'std::endl', kind: 'constant', detail: 'manipulator'),
-      LspCompletion(label: 'std::string', kind: 'type', detail: 'type'),
+      LspCompletion(label: 'std::cin', kind: 'variable', detail: 'std::istream', documentation: 'Standard input stream.'),
+      LspCompletion(label: 'std::endl', kind: 'constant', detail: 'manipulator', documentation: 'Inserts newline and flushes stream.'),
+      LspCompletion(label: 'std::string', kind: 'type', detail: 'std::string', documentation: 'String class.'),
+      LspCompletion(label: 'std::vector', kind: 'type', detail: 'std::vector<T>', documentation: 'Dynamic array container.'),
     ],
     'kotlin': [
       LspCompletion(label: 'fun', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function.'),
       LspCompletion(label: 'val', kind: 'keyword', detail: 'keyword', documentation: 'Read-only property declaration.'),
       LspCompletion(label: 'var', kind: 'keyword', detail: 'keyword', documentation: 'Mutable property declaration.'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'data class', kind: 'keyword', detail: 'keyword', documentation: 'Data holder class.'),
       LspCompletion(label: 'package', kind: 'keyword', detail: 'keyword'),
-      LspCompletion(label: 'println', kind: 'function', detail: 'println(message: Any?)'),
+      LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'println', kind: 'function', detail: 'println(message: Any?)', documentation: 'Prints message and newline.'),
       LspCompletion(label: 'greetUser', kind: 'function', detail: '(name: String): String'),
+    ],
+    'java': [
+      LspCompletion(label: 'public', kind: 'keyword', detail: 'access modifier'),
+      LspCompletion(label: 'private', kind: 'keyword', detail: 'access modifier'),
+      LspCompletion(label: 'protected', kind: 'keyword', detail: 'access modifier'),
+      LspCompletion(label: 'class', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'interface', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'void', kind: 'type', detail: 'type'),
+      LspCompletion(label: 'static', kind: 'keyword', detail: 'modifier'),
+      LspCompletion(label: 'final', kind: 'keyword', detail: 'modifier'),
+      LspCompletion(label: 'System.out.println', kind: 'function', detail: 'System.out.println(...)', documentation: 'Prints to stdout.'),
+    ],
+    'go': [
+      LspCompletion(label: 'package', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'import', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'func', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function.'),
+      LspCompletion(label: 'type', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'struct', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'interface', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'var', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'const', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'fmt.Println', kind: 'function', detail: 'fmt.Println(...)', documentation: 'Formats and prints to stdout.'),
+    ],
+    'rust': [
+      LspCompletion(label: 'fn', kind: 'keyword', detail: 'keyword', documentation: 'Declares a function.'),
+      LspCompletion(label: 'let', kind: 'keyword', detail: 'keyword', documentation: 'Binds a variable.'),
+      LspCompletion(label: 'mut', kind: 'keyword', detail: 'keyword', documentation: 'Makes variable binding mutable.'),
+      LspCompletion(label: 'struct', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'enum', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'impl', kind: 'keyword', detail: 'keyword'),
+      LspCompletion(label: 'println!', kind: 'macro', detail: 'println!(...)', documentation: 'Prints formatted output with newline.'),
+    ],
+    'html': [
+      LspCompletion(label: '<div>', kind: 'tag', detail: 'HTML element'),
+      LspCompletion(label: '<span>', kind: 'tag', detail: 'HTML element'),
+      LspCompletion(label: '<p>', kind: 'tag', detail: 'HTML element'),
+      LspCompletion(label: '<a>', kind: 'tag', detail: 'HTML element'),
+      LspCompletion(label: '<script>', kind: 'tag', detail: 'HTML element'),
+      LspCompletion(label: '<style>', kind: 'tag', detail: 'HTML element'),
+    ],
+    'css': [
+      LspCompletion(label: 'color', kind: 'property', detail: 'property'),
+      LspCompletion(label: 'background-color', kind: 'property', detail: 'property'),
+      LspCompletion(label: 'display', kind: 'property', detail: 'property'),
+      LspCompletion(label: 'flex', kind: 'property', detail: 'property'),
+      LspCompletion(label: 'margin', kind: 'property', detail: 'property'),
+      LspCompletion(label: 'padding', kind: 'property', detail: 'property'),
+    ],
+    'json': [
+      LspCompletion(label: '"name"', kind: 'property', detail: 'string key'),
+      LspCompletion(label: '"version"', kind: 'property', detail: 'string key'),
+      LspCompletion(label: '"description"', kind: 'property', detail: 'string key'),
+      LspCompletion(label: '"dependencies"', kind: 'property', detail: 'object key'),
+    ],
+    'yaml': [
+      LspCompletion(label: 'name:', kind: 'property', detail: 'YAML key'),
+      LspCompletion(label: 'version:', kind: 'property', detail: 'YAML key'),
+      LspCompletion(label: 'dependencies:', kind: 'property', detail: 'YAML key'),
+    ],
+    'sql': [
+      LspCompletion(label: 'SELECT', kind: 'keyword', detail: 'SQL keyword'),
+      LspCompletion(label: 'FROM', kind: 'keyword', detail: 'SQL keyword'),
+      LspCompletion(label: 'WHERE', kind: 'keyword', detail: 'SQL keyword'),
+      LspCompletion(label: 'INSERT INTO', kind: 'keyword', detail: 'SQL keyword'),
+      LspCompletion(label: 'UPDATE', kind: 'keyword', detail: 'SQL keyword'),
+      LspCompletion(label: 'DELETE FROM', kind: 'keyword', detail: 'SQL keyword'),
+    ],
+    'shell': [
+      LspCompletion(label: 'echo', kind: 'command', detail: 'shell command'),
+      LspCompletion(label: 'cd', kind: 'command', detail: 'shell command'),
+      LspCompletion(label: 'ls', kind: 'command', detail: 'shell command'),
+      LspCompletion(label: 'export', kind: 'command', detail: 'shell command'),
     ],
   };
 
@@ -139,8 +263,29 @@ class LspService {
       case 'kt':
       case 'kts':
         return 'kotlin';
+      case 'java':
+        return 'java';
+      case 'go':
+        return 'go';
+      case 'rs':
+        return 'rust';
+      case 'html':
+      case 'htm':
+        return 'html';
+      case 'css':
+      case 'scss':
+        return 'css';
       case 'json':
         return 'json';
+      case 'yaml':
+      case 'yml':
+        return 'yaml';
+      case 'sql':
+        return 'sql';
+      case 'sh':
+      case 'bash':
+      case 'zsh':
+        return 'shell';
       default:
         return 'plaintext';
     }
@@ -151,6 +296,9 @@ class LspService {
     final diagnostics = <LspDiagnostic>[];
     final lines = content.split('\n');
     final lang = detectLanguage(fileName);
+
+    // Document-level bracket & brace tracking across lines
+    var globalParen = 0, globalBrace = 0, globalBracket = 0;
 
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
@@ -171,24 +319,86 @@ class LspService {
         }
       }
 
-      // Check for unmatched closing brackets/parens/braces
-      var openParen = 0;
+      // Python missing colon check for def/if/elif/else/for/while/class/try/except
+      if (lang == 'python') {
+        final pyBlockMatch = RegExp(r'^\s*(def|class|if|elif|else|for|while|try|except)\b.*$').firstMatch(line);
+        if (pyBlockMatch != null) {
+          final trimmed = line.trimRight();
+          if (!trimmed.endsWith(':') && !trimmed.endsWith('\\') && !trimmed.startsWith('#')) {
+            diagnostics.add(LspDiagnostic(
+              fileName: fileName,
+              line: i,
+              col: line.length,
+              message: "Expected ':' at end of ${pyBlockMatch.group(1)} block declaration",
+              severity: DiagnosticSeverity.error,
+              source: 'PyLinter',
+            ));
+          }
+        }
+      }
+
+      // Track open/close parens, braces, brackets across lines
       for (var col = 0; col < line.length; col++) {
         final ch = line[col];
-        if (ch == '(') openParen++;
-        if (ch == ')') openParen--;
-
-        if (openParen < 0) {
-          diagnostics.add(LspDiagnostic(
-            fileName: fileName,
-            line: i,
-            col: col,
-            message: "Unmatched closing parenthesis ')'",
-            severity: DiagnosticSeverity.error,
-            source: 'LSP Parser',
-          ));
-          openParen = 0;
+        if (ch == '(') globalParen++;
+        if (ch == ')') {
+          globalParen--;
+          if (globalParen < 0) {
+            diagnostics.add(LspDiagnostic(
+              fileName: fileName,
+              line: i,
+              col: col,
+              message: "Unmatched closing parenthesis ')'",
+              severity: DiagnosticSeverity.error,
+              source: 'LSP Parser',
+            ));
+            globalParen = 0;
+          }
         }
+        if (ch == '{') globalBrace++;
+        if (ch == '}') {
+          globalBrace--;
+          if (globalBrace < 0 && lang != 'html') {
+            diagnostics.add(LspDiagnostic(
+              fileName: fileName,
+              line: i,
+              col: col,
+              message: "Unmatched closing brace '}'",
+              severity: DiagnosticSeverity.error,
+              source: 'LSP Parser',
+            ));
+            globalBrace = 0;
+          }
+        }
+        if (ch == '[') globalBracket++;
+        if (ch == ']') {
+          globalBracket--;
+          if (globalBracket < 0) {
+            diagnostics.add(LspDiagnostic(
+              fileName: fileName,
+              line: i,
+              col: col,
+              message: "Unmatched closing bracket ']'",
+              severity: DiagnosticSeverity.error,
+              source: 'LSP Parser',
+            ));
+            globalBracket = 0;
+          }
+        }
+      }
+    }
+
+    // JSON unclosed bracket or brace check
+    if (lang == 'json' && content.trim().isNotEmpty) {
+      if (globalBrace > 0 || globalBracket > 0) {
+        diagnostics.add(LspDiagnostic(
+          fileName: fileName,
+          line: lines.length - 1,
+          col: lines.last.length,
+          message: "Unclosed bracket or brace in JSON",
+          severity: DiagnosticSeverity.error,
+          source: 'JSON Parser',
+        ));
       }
     }
 
@@ -217,7 +427,42 @@ class LspService {
       }
     }
 
-    // 2. Dynamic symbols from content (identifiers)
+    // 2. Dynamic symbols from content (functions, classes, variables)
+    final funcRegex = RegExp(r'\b(?:def|function|fun|func|fn)\s+([A-Za-z_$][\w$]*)');
+    final classRegex = RegExp(r'\b(?:class|struct|interface|enum|type)\s+([A-Za-z_$][\w$]*)');
+
+    for (final match in funcRegex.allMatches(content)) {
+      final fnName = match.group(1)!;
+      if (fnName.length >= prefix.length &&
+          fnName.toLowerCase().startsWith(prefix.toLowerCase()) &&
+          fnName != prefix &&
+          !seen.contains(fnName)) {
+        results.add(LspCompletion(
+          label: fnName,
+          kind: 'function',
+          detail: 'function in document',
+          documentation: 'Function declared in $fileName.',
+        ));
+        seen.add(fnName);
+      }
+    }
+
+    for (final match in classRegex.allMatches(content)) {
+      final clsName = match.group(1)!;
+      if (clsName.length >= prefix.length &&
+          clsName.toLowerCase().startsWith(prefix.toLowerCase()) &&
+          clsName != prefix &&
+          !seen.contains(clsName)) {
+        results.add(LspCompletion(
+          label: clsName,
+          kind: 'class',
+          detail: 'type in document',
+          documentation: 'Type declared in $fileName.',
+        ));
+        seen.add(clsName);
+      }
+    }
+
     final wordRegex = RegExp(r'\b[A-Za-z_$][\w$]*\b');
     for (final match in wordRegex.allMatches(content)) {
       final w = match.group(0)!;
@@ -234,6 +479,14 @@ class LspService {
         seen.add(w);
       }
     }
+
+    // Sort: exact prefix case matches first, followed by functions/classes, then variables
+    results.sort((a, b) {
+      final aExact = a.label.startsWith(prefix) ? 0 : 1;
+      final bExact = b.label.startsWith(prefix) ? 0 : 1;
+      if (aExact != bExact) return aExact.compareTo(bExact);
+      return a.label.compareTo(b.label);
+    });
 
     return results;
   }
@@ -262,6 +515,23 @@ class LspService {
             );
           }
         }
+
+        // Check if token matches a function or class definition in document
+        if (RegExp('\\b(?:def|function|fun|func|fn)\\s+$token\\b').hasMatch(content)) {
+          return LspHover(
+            contents: '($lang) function `$token` defined in $fileName',
+            line: row,
+            col: m.start,
+          );
+        }
+        if (RegExp('\\b(?:class|struct|interface|enum|type)\\s+$token\\b').hasMatch(content)) {
+          return LspHover(
+            contents: '($lang) type `$token` defined in $fileName',
+            line: row,
+            col: m.start,
+          );
+        }
+
         return LspHover(
           contents: '($lang) symbol `$token`',
           line: row,

@@ -116,6 +116,16 @@ class EditorModel extends ChangeNotifier {
   void backspace() {
     if (col == 0 && row == 0) return;
     if (col > 0) {
+      final l = currentLine;
+      if (col < l.length) {
+        final charBefore = l[col - 1];
+        final charAfter = l[col];
+        if (_autoPairs[charBefore] == charAfter) {
+          _doc.deleteRange(TextPosition(row, col - 1), TextPosition(row, col + 1));
+          dirty = true;
+          return;
+        }
+      }
       _doc.deleteRange(TextPosition(row, col - 1), TextPosition(row, col));
     } else if (row > 0) {
       final prevLen = lines[row - 1].length;
