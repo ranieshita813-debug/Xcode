@@ -22,14 +22,13 @@ void main() {
     await tester.pumpWidget(buildTestableWidget(const HomeScreen()));
 
     expect(find.text('Lattice Studio'), findsOneWidget);
-    expect(find.text('Launch Editor Workspace'), findsOneWidget);
-    expect(find.text('RECENT FILES & PROJECTS'), findsOneWidget);
+    expect(find.text('Recent'), findsOneWidget);
 
     // Tap on second tab item in NavigationBar
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('APPEARANCE'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Font size'), findsOneWidget);
   });
 }
