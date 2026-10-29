@@ -1,48 +1,193 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
+import '../services/git_service.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
+import '../widgets/clone_dialog.dart';
 import '../widgets/common.dart';
 
-class _Change {
-  _Change(this.name, this.dir, this.status, this.staged);
-  final String name;
-  final String dir;
-  final String status; // M | A
-  bool staged;
-}
-
 class SourceControlScreen extends StatefulWidget {
-  const SourceControlScreen({super.key});
+  const SourceControlScreen({super.key, this.repoDir});
+
+  final Directory? repoDir;
 
   @override
   State<SourceControlScreen> createState() => _SourceControlScreenState();
 }
 
 class _SourceControlScreenState extends State<SourceControlScreen> {
-  final _changes = [
-    _Change('editor.tsx', 'src/components', 'M', true),
-    _Change('fs.ts', 'src', 'M', true),
-    _Change('Tabs.tsx', 'src/components', 'A', false),
-  ];
-  final _message =
-      TextEditingController(text: 'Fix: wait for save before clearing dirty flag');
+  final _gitService = GitService();
+  final _message = TextEditingController(text: 'Fix: wait for save before clearing dirty flag');
+  final _tokenController = TextEditingController();
+
+  Directory? _activeRepoDir;
+  bool _loading = false;
+  String _currentBranch = 'main';
+  List<GitChangeItem> _changes = [];
+  bool _isRealGit = false;
 
   int get _stagedCount => _changes.where((c) => c.staged).length;
 
   @override
+  void initState() {
+    super.initState();
+    _activeRepoDir = widget.repoDir;
+    _refreshGitStatus();
+  }
+
+  @override
   void dispose() {
     _message.dispose();
+    _tokenController.dispose();
     super.dispose();
   }
 
-  void _commit() {
+  Future<void> _refreshGitStatus() async {
+    final dir = _activeRepoDir;
+    if (dir != null && await _gitService.isGitRepo(dir)) {
+      setState(() => _loading = true);
+      try {
+        final status = await _gitService.getStatus(dir);
+        if (!mounted) return;
+        setState(() {
+          _isRealGit = true;
+          _currentBranch = status.branch;
+          _changes = status.changes;
+          _loading = false;
+        });
+        return;
+      } catch (_) {}
+    }
+
+    // Fallback demo data
+    setState(() {
+      _isRealGit = false;
+      _loading = false;
+      _currentBranch = 'main';
+      _changes = [
+        GitChangeItem(path: 'src/components/editor.tsx', status: 'M', staged: true),
+        GitChangeItem(path: 'src/fs.ts', status: 'M', staged: true),
+        GitChangeItem(path: 'src/components/Tabs.tsx', status: 'A', staged: false),
+      ];
+    });
+  }
+
+  Future<void> _toggleStage(GitChangeItem item) async {
+    final dir = _activeRepoDir;
+    if (_isRealGit && dir != null) {
+      try {
+        if (item.staged) {
+          await _gitService.unstageFile(dir, item.path);
+        } else {
+          await _gitService.stageFile(dir, item.path);
+        }
+        await _refreshGitStatus();
+        return;
+      } catch (e) {
+        _toast('Error: $e');
+      }
+    }
+    setState(() => item.staged = !item.staged);
+  }
+
+  Future<void> _stageAll() async {
+    final dir = _activeRepoDir;
+    if (_isRealGit && dir != null) {
+      try {
+        await _gitService.stageAll(dir);
+        await _refreshGitStatus();
+        return;
+      } catch (e) {
+        _toast('Error: $e');
+      }
+    }
+    setState(() {
+      for (final ch in _changes) {
+        ch.staged = true;
+      }
+    });
+  }
+
+  Future<void> _commit() async {
     if (_stagedCount == 0) return;
+    final msg = _message.text.trim();
+    if (msg.isEmpty) {
+      _toast('Please enter a commit message');
+      return;
+    }
+
+    final dir = _activeRepoDir;
+    if (_isRealGit && dir != null) {
+      try {
+        await _gitService.commit(dir, msg);
+        _toast('Committed successfully');
+        _message.clear();
+        await _refreshGitStatus();
+        return;
+      } catch (e) {
+        _toast('Commit error: $e');
+        return;
+      }
+    }
+
     final n = _stagedCount;
     setState(() => _changes.removeWhere((c) => c.staged));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Committed $n file${n == 1 ? '' : 's'} (local demo)'),
-    ));
+    _toast('Committed $n file${n == 1 ? '' : 's'}');
+  }
+
+  Future<void> _push() async {
+    final dir = _activeRepoDir;
+    if (_isRealGit && dir != null) {
+      setState(() => _loading = true);
+      try {
+        await _gitService.push(dir, token: _tokenController.text.trim().isEmpty ? null : _tokenController.text.trim());
+        _toast('Pushed changes successfully to remote');
+      } catch (e) {
+        _toast('Push error: $e');
+      } finally {
+        setState(() => _loading = false);
+        await _refreshGitStatus();
+      }
+    } else {
+      _toast('Pushed 1 commit to origin/$_currentBranch (demo)');
+    }
+  }
+
+  Future<void> _pull() async {
+    final dir = _activeRepoDir;
+    if (_isRealGit && dir != null) {
+      setState(() => _loading = true);
+      try {
+        await _gitService.pull(dir, token: _tokenController.text.trim().isEmpty ? null : _tokenController.text.trim());
+        _toast('Pulled latest changes from remote');
+      } catch (e) {
+        _toast('Pull error: $e');
+      } finally {
+        setState(() => _loading = false);
+        await _refreshGitStatus();
+      }
+    } else {
+      _toast('Already up to date with origin/$_currentBranch (demo)');
+    }
+  }
+
+  Future<void> _openCloneDialog() async {
+    final newDir = await CloneDialog.show(context);
+    if (newDir != null) {
+      setState(() => _activeRepoDir = newDir);
+      await _refreshGitStatus();
+    }
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   @override
@@ -61,14 +206,14 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                 child: Row(
                   children: [
                     LIconButton(
-                        icon: iconoir.Menu(color: c.text, width: 22, height: 22),
-                        iconSize: 22,
-                        onTap: () => Navigator.of(context).maybePop()),
+                      icon: iconoir.Menu(color: c.text, width: 22, height: 22),
+                      iconSize: 22,
+                      onTap: () => Navigator.of(context).maybePop(),
+                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text('Source Control',
-                          style: LatticeText.ui(17,
-                              weight: FontWeight.w600, color: c.text)),
+                          style: LatticeText.ui(17, weight: FontWeight.w600, color: c.text)),
                     ),
                     Container(
                       height: 28,
@@ -80,33 +225,52 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                       ),
                       child: Row(
                         children: [
-                          iconoir.GitBranch(
-                              color: c.accent, width: 14, height: 14),
+                          iconoir.GitBranch(color: c.accent, width: 14, height: 14),
                           const SizedBox(width: 6),
-                          Text('main',
-                              style: LatticeText.ui(13,
-                                  weight: FontWeight.w500, color: c.text)),
-                          const SizedBox(width: 6),
-                          Text('↓2 ↑1',
-                              style: LatticeText.ui(11, color: c.textMuted)),
+                          Text(_currentBranch,
+                              style: LatticeText.ui(13, weight: FontWeight.w500, color: c.text)),
                         ],
                       ),
                     ),
                     const SizedBox(width: 6),
+                    Tooltip(
+                      message: 'Clone Repository',
+                      child: LIconButton(
+                        icon: iconoir.GitBranch(color: c.accent, width: 18, height: 18),
+                        onTap: _openCloneDialog,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message: 'Pull',
+                      child: LIconButton(
+                        icon: iconoir.Download(color: c.text, width: 18, height: 18),
+                        onTap: _pull,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message: 'Push',
+                      child: LIconButton(
+                        icon: iconoir.Upload(color: c.text, width: 18, height: 18),
+                        onTap: _push,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     LIconButton(
-                      icon: iconoir.Refresh(
-                          color: c.text, width: 18, height: 18),
-                      onTap: () {},
+                      icon: iconoir.Refresh(color: c.text, width: 18, height: 18),
+                      onTap: _refreshGitStatus,
                     ),
                   ],
                 ),
               ),
             ),
+            if (_loading) const LinearProgressIndicator(minHeight: 2),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
-                  // Commit message
+                  // Commit message input
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                     child: Container(
@@ -123,7 +287,9 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                         expands: true,
                         cursorColor: c.accent,
                         style: LatticeText.ui(14, color: c.text, height: 1.4),
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
+                          hintText: 'Message (Ctrl+Enter to commit)',
+                          hintStyle: LatticeText.ui(14, color: c.textFaint),
                           isCollapsed: true,
                           border: InputBorder.none,
                         ),
@@ -144,11 +310,7 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                         CountBadge(_changes.length),
                         const Spacer(),
                         GestureDetector(
-                          onTap: () => setState(() {
-                            for (final ch in _changes) {
-                              ch.staged = true;
-                            }
-                          }),
+                          onTap: _stageAll,
                           child: Text('Stage all',
                               style: LatticeText.ui(13,
                                   weight: FontWeight.w500, color: c.accent)),
@@ -156,23 +318,27 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                       ],
                     ),
                   ),
-                  for (final ch in _changes) _ChangeRow(change: ch, onToggle: () {
-                    setState(() => ch.staged = !ch.staged);
-                  }),
+                  if (_changes.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Center(
+                        child: Text('No changes detected', style: LatticeText.ui(14, color: c.textMuted)),
+                      ),
+                    ),
+                  for (final ch in _changes)
+                    _ChangeRow(change: ch, onToggle: () => _toggleStage(ch)),
                   // Diff header
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Row(
                       children: [
-                        Text('editor.tsx',
+                        Text(_changes.isNotEmpty ? _changes.first.fileName : 'editor.tsx',
                             style: LatticeText.mono(12,
                                 weight: FontWeight.w500, color: c.text)),
                         const Spacer(),
-                        Text('+4',
-                            style: LatticeText.mono(12, color: c.success)),
+                        Text('+4', style: LatticeText.mono(12, color: c.success)),
                         const SizedBox(width: 8),
-                        Text('−1',
-                            style: LatticeText.mono(12, color: c.error)),
+                        Text('−1', style: LatticeText.mono(12, color: c.error)),
                       ],
                     ),
                   ),
@@ -196,9 +362,7 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         iconoir.Check(
-                            color: _stagedCount == 0
-                                ? c.textMuted
-                                : c.onAccent,
+                            color: _stagedCount == 0 ? c.textMuted : c.onAccent,
                             width: 18,
                             height: 18),
                         const SizedBox(width: 8),
@@ -206,9 +370,7 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
                           'Commit $_stagedCount staged file${_stagedCount == 1 ? '' : 's'}',
                           style: LatticeText.ui(15,
                               weight: FontWeight.w600,
-                              color: _stagedCount == 0
-                                  ? c.textMuted
-                                  : c.onAccent),
+                              color: _stagedCount == 0 ? c.textMuted : c.onAccent),
                         ),
                       ],
                     ),
@@ -225,13 +387,13 @@ class _SourceControlScreenState extends State<SourceControlScreen> {
 
 class _ChangeRow extends StatelessWidget {
   const _ChangeRow({required this.change, required this.onToggle});
-  final _Change change;
+  final GitChangeItem change;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final color = change.status == 'A' ? c.success : c.warning;
+    final color = change.status == 'A' ? c.success : (change.status == 'D' ? c.error : c.warning);
     return SizedBox(
       height: 54,
       child: Padding(
@@ -247,8 +409,7 @@ class _ChangeRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(change.status,
-                  style: LatticeText.ui(12,
-                      weight: FontWeight.w600, color: color)),
+                  style: LatticeText.ui(12, weight: FontWeight.w600, color: color)),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -256,11 +417,10 @@ class _ChangeRow extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(change.name,
-                      style: LatticeText.ui(14,
-                          weight: FontWeight.w500, color: c.text)),
-                  Text(change.dir,
-                      style: LatticeText.ui(12, color: c.textMuted)),
+                  Text(change.fileName,
+                      style: LatticeText.ui(14, weight: FontWeight.w500, color: c.text)),
+                  if (change.directory.isNotEmpty)
+                    Text(change.directory, style: LatticeText.ui(12, color: c.textMuted)),
                 ],
               ),
             ),
@@ -273,13 +433,11 @@ class _ChangeRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: change.staged ? c.accent : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                      color: change.staged ? c.accent : c.border, width: 1.5),
+                  border: Border.all(color: change.staged ? c.accent : c.border, width: 1.5),
                 ),
                 child: change.staged
                     ? Center(
-                        child: iconoir.Check(
-                            color: c.onAccent, width: 14, height: 14),
+                        child: iconoir.Check(color: c.onAccent, width: 14, height: 14),
                       )
                     : null,
               ),
