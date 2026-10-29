@@ -8,6 +8,7 @@ import '../services/file_service.dart';
 import '../state/settings.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
+import '../widgets/code_forge_panel.dart';
 import '../widgets/code_view.dart';
 import '../widgets/command_palette.dart';
 import '../widgets/common.dart';
@@ -41,6 +42,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   bool _drawer = false;
   bool _terminal = false;
+  bool _codeForge = false;
   bool _autoSave = false;
   String? _paletteQuery; // non-null => palette open
   int _paletteSel = 0;
@@ -160,6 +162,10 @@ class _EditorScreenState extends State<EditorScreen> {
         SettingsScope.of(context).update((s) => s.wordWrap = !s.wordWrap);
       case 'run':
         _run();
+      case 'codeforge.assistant':
+      case 'codeforge.fix':
+      case 'codeforge.generate':
+        setState(() => _codeForge = true);
     }
   }
 
@@ -293,7 +299,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final m = _model;
 
     return PopScope(
-      canPop: !(_drawer || paletteOpen || _terminal),
+      canPop: !(_drawer || paletteOpen || _terminal || _codeForge),
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         setState(() {
@@ -301,6 +307,8 @@ class _EditorScreenState extends State<EditorScreen> {
             _paletteQuery = null;
           } else if (_drawer) {
             _drawer = false;
+          } else if (_codeForge) {
+            _codeForge = false;
           } else {
             _terminal = false;
           }
@@ -323,6 +331,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       onTitle: _openPalette,
                       onUndo: () => m?.undo(),
                       onRedo: () => m?.redo(),
+                      onCodeForge: () => setState(() => _codeForge = !_codeForge),
                       onRun: _run,
                       onSave: () => _saveFile(_active, toast: true),
                     ),
@@ -347,6 +356,29 @@ class _EditorScreenState extends State<EditorScreen> {
                     SafeArea(top: false, child: ExtraKeys(onKey: _onKey)),
                   ],
                 ),
+                if (_codeForge && m != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SafeArea(
+                      top: false,
+                      child: CodeForgePanel(
+                        fileName: _active,
+                        currentCode: m.text,
+                        onInsertCode: (code) {
+                          m.insert('\n$code\n');
+                          _toast('Code inserted from CodeForge');
+                        },
+                        onReplaceCode: (code) {
+                          m.lines = code.split('\n');
+                          m.dirty = true;
+                          _toast('Code replaced from CodeForge');
+                        },
+                        onClose: () => setState(() => _codeForge = false),
+                      ),
+                    ),
+                  ),
                 // Left-edge swipe opens the drawer.
                 if (!_drawer)
                   Positioned(
@@ -426,12 +458,13 @@ class _AppBar extends StatelessWidget {
     required this.onTitle,
     required this.onUndo,
     required this.onRedo,
+    required this.onCodeForge,
     required this.onRun,
     required this.onSave,
   });
 
   final String title;
-  final VoidCallback onMenu, onTitle, onUndo, onRedo, onRun, onSave;
+  final VoidCallback onMenu, onTitle, onUndo, onRedo, onCodeForge, onRun, onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -470,6 +503,8 @@ class _AppBar extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 4),
+            tip('CodeForge AI', LIconButton(icon: iconoir.Cpu(color: c.accent, width: 18, height: 18), onTap: onCodeForge)),
             const SizedBox(width: 4),
             tip('Save', LIconButton(icon: iconoir.FloppyDisk(color: c.text, width: 18, height: 18), onTap: onSave)),
             const SizedBox(width: 4),

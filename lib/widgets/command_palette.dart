@@ -37,6 +37,21 @@ final kCommands = <PaletteCommand>[
       'Run Current File',
       (color, size) => iconoir.Play(color: color, width: size, height: size),
       'Run'),
+  PaletteCommand(
+      'codeforge.assistant',
+      'CodeForge: Open AI Assistant',
+      (color, size) => iconoir.Cpu(color: color, width: size, height: size),
+      'CodeForge'),
+  PaletteCommand(
+      'codeforge.fix',
+      'CodeForge: Fix Errors in Code',
+      (color, size) => iconoir.Wrench(color: color, width: size, height: size),
+      'CodeForge'),
+  PaletteCommand(
+      'codeforge.generate',
+      'CodeForge: Generate Code',
+      (color, size) => iconoir.Flash(color: color, width: size, height: size),
+      'CodeForge'),
 ];
 
 const kTotalCommands = 38;
