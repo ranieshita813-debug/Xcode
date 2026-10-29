@@ -27,17 +27,9 @@ class EditorScreen extends StatefulWidget {
 class _EditorScreenState extends State<EditorScreen> {
   final FileService _fileService = FileService();
 
-  final _models = <String, EditorModel>{
-    'editor.tsx': EditorModel.editorTsx(),
-    'fs.ts': EditorModel.fsTs(),
-    'App.tsx': EditorModel.appTsx(),
-    'main.dart': EditorModel.mainDart(),
-    'app.py': EditorModel.appPy(),
-    'native.cpp': EditorModel.nativeCpp(),
-    'Helper.kt': EditorModel.helperKt(),
-  };
-  final _openTabs = <String>['editor.tsx', 'main.dart', 'app.py'];
-  String _active = 'editor.tsx';
+  final _models = <String, EditorModel>{};
+  final _openTabs = <String>[];
+  String _active = '';
 
   bool _drawer = false;
   bool _autoSave = false;
@@ -55,8 +47,21 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
-    _models.forEach(_watch);
-    _seedStorage();
+    _loadInitialFiles();
+  }
+
+  Future<void> _loadInitialFiles() async {
+    const defaultFiles = ['lib/main.dart', 'README.md', 'pubspec.yaml'];
+    for (final file in defaultFiles) {
+      if (await _fileService.exists(file)) {
+        await _openFile(file);
+      }
+    }
+    if (_openTabs.isNotEmpty && mounted) {
+      setState(() {
+        _active = _openTabs.first;
+      });
+    }
   }
 
   @override
