@@ -1423,7 +1423,7 @@ class _ToolbarBtn extends StatelessWidget {
   }
 }
 
-class _Autocomplete extends StatelessWidget {
+class _Autocomplete extends StatefulWidget {
   const _Autocomplete({
     required this.suggestions,
     required this.prefix,
@@ -1436,53 +1436,160 @@ class _Autocomplete extends StatelessWidget {
   final String fontFamily;
 
   @override
+  State<_Autocomplete> createState() => _AutocompleteState();
+}
+
+class _AutocompleteState extends State<_Autocomplete> {
+  int _selectedIndex = 0;
+
+  @override
+  void didUpdateWidget(_Autocomplete oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedIndex >= widget.suggestions.length) {
+      _selectedIndex = 0;
+    }
+  }
+
+  Color _kindColor(String kind) {
+    switch (kind.toLowerCase()) {
+      case 'method':
+      case 'function':
+        return const Color(0xFFB5CEA8);
+      case 'class':
+      case 'interface':
+      case 'type':
+        return const Color(0xFF4EC9B0);
+      case 'variable':
+      case 'const':
+      case 'field':
+        return const Color(0xFF9CDCFE);
+      case 'keyword':
+        return const Color(0xFF569CD6);
+      case 'property':
+        return const Color(0xFFCE9178);
+      case 'tag':
+        return const Color(0xFF808080);
+      default:
+        return const Color(0xFFDCDCAA);
+    }
+  }
+
+  String _kindSymbol(String kind) {
+    switch (kind.toLowerCase()) {
+      case 'method':
+      case 'function':
+        return 'ƒ';
+      case 'class':
+      case 'interface':
+      case 'type':
+        return 'T';
+      case 'variable':
+      case 'const':
+      case 'field':
+        return 'v';
+      case 'keyword':
+        return 'k';
+      case 'property':
+        return 'p';
+      case 'tag':
+        return 't';
+      default:
+        return 's';
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Container(
-      width: 240,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: c.raised,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: c.border),
-        boxShadow: const [
-          BoxShadow(color: Color(0x73000000), blurRadius: 20, offset: Offset(0, 8)),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < suggestions.length; i++)
-            Padding(
-              padding: EdgeInsets.only(top: i == 0 ? 0 : 2),
-              child: Material(
-                color: i == 0 ? c.accentSoft : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
+    final displayed = widget.suggestions.take(8).toList();
+
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            setState(() {
+              _selectedIndex = (_selectedIndex + 1) % displayed.length;
+            });
+            return KeyEventResult.handled;
+          } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            setState(() {
+              _selectedIndex = (_selectedIndex - 1 + displayed.length) % displayed.length;
+            });
+            return KeyEventResult.handled;
+          } else if (event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.tab) {
+            if (_selectedIndex < displayed.length) {
+              widget.onPick(displayed[_selectedIndex]);
+              return KeyEventResult.handled;
+            }
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        width: 280,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: c.border),
+          boxShadow: const [
+            BoxShadow(color: Color(0x66000000), blurRadius: 16, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < displayed.length; i++)
+              Material(
+                color: i == _selectedIndex ? c.accentSoft : Colors.transparent,
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => onPick(suggestions[i]),
+                  onTap: () {
+                    setState(() => _selectedIndex = i);
+                    widget.onPick(displayed[i]);
+                  },
                   child: Container(
-                    height: 40, // bigger touch target
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Row(
                       children: [
-                        Expanded(child: _label(c, suggestions[i].label)),
+                        Container(
+                          width: 18,
+                          height: 18,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _kindColor(displayed[i].kind).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            _kindSymbol(displayed[i].kind),
+                            style: LatticeText.mono(11,
+                                weight: FontWeight.w700,
+                                color: _kindColor(displayed[i].kind)),
+                          ),
+                        ),
                         const SizedBox(width: 8),
-                        Text(suggestions[i].kind,
-                            style: LatticeText.ui(11, color: c.textMuted)),
+                        Expanded(child: _label(c, displayed[i].label)),
+                        const SizedBox(width: 8),
+                        Text(
+                          displayed[i].kind,
+                          style: LatticeText.ui(10, color: c.textMuted),
+                        ),
                       ],
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _label(dynamic c, String label) {
-    final plain = LatticeText.mono(13, color: c.text, fontFamily: fontFamily);
+    final plain = LatticeText.mono(13, color: c.text, fontFamily: widget.fontFamily);
+    final prefix = widget.prefix;
     final matches = prefix.isNotEmpty &&
         label.length >= prefix.length &&
         label.toLowerCase().startsWith(prefix.toLowerCase());
@@ -1494,7 +1601,7 @@ class _Autocomplete extends StatelessWidget {
         TextSpan(
           text: label.substring(0, prefix.length),
           style: LatticeText.mono(13,
-              weight: FontWeight.w600, color: c.accent, fontFamily: fontFamily),
+              weight: FontWeight.w700, color: c.accent, fontFamily: widget.fontFamily),
         ),
         TextSpan(text: label.substring(prefix.length), style: plain),
       ]),
@@ -1647,13 +1754,13 @@ class _StatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final fg = ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
-        ? Colors.white
-        : const Color(0xFF0B0D10);
-    final st = LatticeText.ui(11.5, color: fg);
+    final st = LatticeText.ui(11.5, color: c.textMuted);
     return Container(
       height: 28,
-      color: c.accent,
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(top: BorderSide(color: c.border)),
+      ),
       child: Row(
         children: [
           Expanded(
