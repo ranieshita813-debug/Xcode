@@ -78,18 +78,6 @@ _Glyph? _glyphFor(String name) {
   }
 }
 
-Color? _folderTint(String name) {
-  switch (name) {
-    case 'src':
-      return const Color(0xFF3B82F6);
-    case 'components':
-      return const Color(0xFF8B5CF6);
-    case 'assets':
-      return const Color(0xFFF59E0B);
-    default:
-      return null;
-  }
-}
 
 class _FileGlyph extends StatelessWidget {
   const _FileGlyph(this.name);
@@ -862,8 +850,14 @@ class _OpenEditorRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final textStyle = LatticeText.ui(
+      13.5,
+      weight: active ? FontWeight.w600 : FontWeight.w400,
+      color: active ? c.text : _statusColor(c, status),
+    );
+
     return Material(
-      color: active ? c.accentSoft : Colors.transparent,
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
@@ -874,14 +868,21 @@ class _OpenEditorRow extends StatelessWidget {
               children: [
                 Icon(Icons.close, size: 14, color: c.textFaint),
                 const SizedBox(width: 8),
-                _FileGlyph(name),
-                const SizedBox(width: 8),
                 Expanded(
-                  child: Text(name,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      name,
                       overflow: TextOverflow.ellipsis,
-                      style: LatticeText.ui(13.5,
-                          weight: active ? FontWeight.w600 : FontWeight.w400,
-                          color: _statusColor(c, status))),
+                      style: active
+                          ? textStyle.copyWith(
+                              decoration: TextDecoration.underline,
+                              decorationColor: c.accent,
+                              decorationThickness: 2,
+                            )
+                          : textStyle,
+                    ),
+                  ),
                 ),
                 if (status != null)
                   Container(
@@ -924,8 +925,12 @@ class _TreeRow extends StatelessWidget {
   Widget _label(dynamic c) {
     final style = LatticeText.ui(
       13.5,
-      weight: active ? FontWeight.w600 : FontWeight.w400,
-      color: _statusColor(c, node.status),
+      weight: (active || selected) ? FontWeight.w600 : FontWeight.w400,
+      color: (active || selected) ? c.text : _statusColor(c, node.status),
+    ).copyWith(
+      decoration: (active || selected) ? TextDecoration.underline : TextDecoration.none,
+      decorationColor: c.accent,
+      decorationThickness: 2,
     );
     final name = node.name;
     final i = query.isEmpty ? -1 : name.toLowerCase().indexOf(query);
@@ -952,7 +957,6 @@ class _TreeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final folderTint = _folderTint(node.name) ?? c.textMuted;
 
     return Semantics(
       button: true,
@@ -960,9 +964,7 @@ class _TreeRow extends StatelessWidget {
       expanded: node.folder ? expanded : null,
       label: node.name,
       child: Material(
-        color: active
-            ? c.accentSoft
-            : (selected ? c.raised : Colors.transparent),
+        color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
           child: SizedBox(
@@ -999,17 +1001,6 @@ class _TreeRow extends StatelessWidget {
                             : null,
                       ),
                       const SizedBox(width: 4),
-                      if (node.folder)
-                        Icon(
-                          expanded
-                              ? Icons.folder_open_rounded
-                              : Icons.folder_rounded,
-                          size: 18,
-                          color: folderTint,
-                        )
-                      else
-                        _FileGlyph(node.name),
-                      const SizedBox(width: 8),
                       Expanded(child: _label(c)),
                       if (node.status != null)
                         Text(

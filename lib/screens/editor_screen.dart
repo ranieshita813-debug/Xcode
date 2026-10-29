@@ -16,6 +16,7 @@ import '../widgets/keyboard.dart';
 import '../widgets/terminal_panel.dart';
 import 'settings_screen.dart';
 import 'source_control_screen.dart';
+import 'terminal_screen.dart';
 
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
@@ -185,10 +186,9 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     }
 
-    setState(() {
-      _build = BuildResult(errors: errors);
-      _terminal = true;
-    });
+    final result = BuildResult(errors: errors);
+    _push(TerminalScreen(result: result));
+
     await _saveFile(_active);
     if (_autoSave) {
       for (final name in _models.keys.toList()) {
@@ -269,7 +269,7 @@ class _EditorScreenState extends State<EditorScreen> {
       LogicalKeyboardKey.keyS: () => _saveFile(_active, toast: true),
       LogicalKeyboardKey.keyP: _openPalette,
       LogicalKeyboardKey.keyB: () => setState(() => _drawer = !_drawer),
-      LogicalKeyboardKey.backquote: () => setState(() => _terminal = !_terminal),
+      LogicalKeyboardKey.backquote: () => _push(TerminalScreen(result: _build)),
       LogicalKeyboardKey.keyZ: () => _model?.undo(),
       LogicalKeyboardKey.keyY: () => _model?.redo(),
     };
@@ -324,7 +324,6 @@ class _EditorScreenState extends State<EditorScreen> {
                       onUndo: () => m?.undo(),
                       onRedo: () => m?.redo(),
                       onRun: _run,
-                      onSave: () => _saveFile(_active, toast: true),
                     ),
                     _Tabs(
                       tabs: _openTabs,
@@ -339,11 +338,6 @@ class _EditorScreenState extends State<EditorScreen> {
                           ? _EmptyState(onOpen: () => setState(() => _drawer = true))
                           : CodeView(key: ValueKey(_active), model: m),
                     ),
-                    if (_terminal)
-                      TerminalPanel(
-                        result: _build,
-                        onClose: () => setState(() => _terminal = false),
-                      ),
                     SafeArea(top: false, child: ExtraKeys(onKey: _onKey)),
                   ],
                 ),
@@ -427,11 +421,10 @@ class _AppBar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onRun,
-    required this.onSave,
   });
 
   final String title;
-  final VoidCallback onMenu, onTitle, onUndo, onRedo, onRun, onSave;
+  final VoidCallback onMenu, onTitle, onUndo, onRedo, onRun;
 
   @override
   Widget build(BuildContext context) {
@@ -470,8 +463,6 @@ class _AppBar extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 4),
-            tip('Save', LIconButton(icon: iconoir.FloppyDisk(color: c.text, width: 18, height: 18), onTap: onSave)),
             const SizedBox(width: 4),
             tip('Undo', LIconButton(icon: iconoir.Undo(color: c.text, width: 18, height: 18), onTap: onUndo)),
             const SizedBox(width: 4),
@@ -575,6 +566,9 @@ class _TabItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final textStyle = LatticeText.ui(13,
+        weight: active ? FontWeight.w600 : FontWeight.w400,
+        color: active ? c.text : c.textMuted);
     return Semantics(
       button: true,
       selected: active,
@@ -584,12 +578,11 @@ class _TabItem extends StatelessWidget {
         child: Container(
           constraints: const BoxConstraints(minWidth: 96, maxWidth: 200),
           decoration: BoxDecoration(
-            color: active ? c.bg : Colors.transparent,
+            color: Colors.transparent,
             border: Border(right: BorderSide(color: c.border)),
           ),
           child: Column(
             children: [
-              Container(height: 2, color: active ? c.accent : Colors.transparent),
               SizedBox(
                 height: 39,
                 child: Padding(
@@ -601,9 +594,13 @@ class _TabItem extends StatelessWidget {
                         child: Text(
                           name,
                           overflow: TextOverflow.ellipsis,
-                          style: LatticeText.ui(13,
-                              weight: active ? FontWeight.w500 : FontWeight.w400,
-                              color: active ? c.text : c.textMuted),
+                          style: active
+                              ? textStyle.copyWith(
+                                  decoration: TextDecoration.underline,
+                                  decorationColor: c.accent,
+                                  decorationThickness: 2,
+                                )
+                              : textStyle,
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -637,6 +634,7 @@ class _TabItem extends StatelessWidget {
                   ),
                 ),
               ),
+              Container(height: 2, color: active ? c.accent : Colors.transparent),
             ],
           ),
         ),

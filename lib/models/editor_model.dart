@@ -193,7 +193,7 @@ class EditorModel extends ChangeNotifier {
 
   List<Suggestion> get suggestions {
     final p = prefix;
-    if (p.length < 2) return const [];
+    if (p.isEmpty) return const [];
     final completions = lspService.getCompletions(fileName, text, row, col, p);
     final results = completions.map((c) => Suggestion(c.label, c.kind)).toList();
 
