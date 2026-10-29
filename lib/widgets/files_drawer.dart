@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
@@ -17,22 +18,33 @@ class _Node {
   String get parent => path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 }
 
-const _initial = <_Node>[
-  _Node('src', folder: true),
-  _Node('src/components', folder: true),
-  _Node('src/components/editor.tsx', status: 'M'),
-  _Node('src/components/Tabs.tsx', status: 'A'),
-  _Node('src/fs.ts', status: 'M'),
-  _Node('src/App.tsx'),
-  _Node('src/main.dart'),
-  _Node('src/app.py'),
-  _Node('src/native.cpp'),
-  _Node('src/Helper.kt'),
-  _Node('assets', folder: true),
-  _Node('package.json'),
-  _Node('tsconfig.json'),
-  _Node('README.md'),
-];
+List<_Node> _scanRealDirectory(Directory dir, {String rootPath = '/app'}) {
+  if (!dir.existsSync()) return [];
+  final nodes = <_Node>[];
+
+  void walk(Directory currentDir) {
+    try {
+      final entities = currentDir.listSync(recursive: false);
+      for (final entity in entities) {
+        final name = entity.path.substring(entity.path.lastIndexOf('/') + 1);
+        if (name.startsWith('.')) continue; // skip hidden files like .git
+        final relPath = entity.path.startsWith(rootPath)
+            ? entity.path.substring(rootPath.length).replaceAll(RegExp(r'^/'), '')
+            : entity.path;
+
+        if (entity is Directory) {
+          nodes.add(_Node(relPath, folder: true));
+          walk(entity);
+        } else if (entity is File) {
+          nodes.add(_Node(relPath));
+        }
+      }
+    } catch (_) {}
+  }
+
+  walk(dir);
+  return nodes;
+}
 
 class _Pending {
   const _Pending({required this.folder, required this.dir});
@@ -89,8 +101,21 @@ class FilesDrawer extends StatefulWidget {
 
 class _FilesDrawerState extends State<FilesDrawer> {
   final _q = TextEditingController();
-  final List<_Node> _items = List.of(_initial);
-  final Set<String> _open = {'src', 'src/components'};
+  late List<_Node> _items;
+  final Set<String> _open = {'lib', 'lib/widgets', 'lib/screens', 'src'};
+
+  @override
+  void initState() {
+    super.initState();
+    final realNodes = _scanRealDirectory(Directory('/app'));
+    _items = realNodes.isNotEmpty
+        ? realNodes
+        : [
+            const _Node('lib', folder: true),
+            const _Node('lib/main.dart'),
+            const _Node('README.md'),
+          ];
+  }
   bool _editorsOpen = true;
   bool _projectOpen = true;
   String? _selected; // last tapped path; decides where "new" is created
@@ -290,6 +315,23 @@ class _FilesDrawerState extends State<FilesDrawer> {
       }
     }
 
+    void openInIntelliJ() async {
+      try {
+        await Process.run('idea', ['/app']);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Opening IntelliJ IDEA...')),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not launch IntelliJ IDEA: $e')),
+          );
+        }
+      }
+    }
+
     return Container(
       width: width,
       decoration: BoxDecoration(
@@ -338,6 +380,15 @@ class _FilesDrawerState extends State<FilesDrawer> {
                     ),
                   ),
                   Tooltip(
+                    message: 'Open in IntelliJ IDEA',
+                    child: LIconButton(
+                        icon: iconoir.Code(
+                            color: c.text, width: 18, height: 18),
+                        size: 36,
+                        onTap: openInIntelliJ),
+                  ),
+                  const SizedBox(width: 6),
+                  Tooltip(
                     message: 'New file',
                     child: LIconButton(
                         icon: iconoir.PagePlus(
@@ -345,7 +396,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
                         size: 36,
                         onTap: () => _startCreate(folder: false)),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 6),
                   Tooltip(
                     message: 'New folder',
                     child: LIconButton(
