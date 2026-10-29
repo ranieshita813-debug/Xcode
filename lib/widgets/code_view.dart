@@ -18,6 +18,7 @@ import 'package:highlight/languages/yaml.dart';
 
 import '../models/editor_model.dart';
 import '../models/folding_model.dart';
+import '../services/lsp_service.dart';
 import '../state/settings.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
@@ -114,6 +115,8 @@ class _CodeViewState extends State<CodeView> {
       text: widget.model.text,
       language: mode,
     );
+    final initialOffset = rowColToOffset(widget.model.lines, widget.model.row, widget.model.col);
+    _codeController.selection = TextSelection.collapsed(offset: initialOffset);
     _codeController.addListener(_onCodeChanged);
   }
 
@@ -131,21 +134,38 @@ class _CodeViewState extends State<CodeView> {
 
   void _onCodeChanged() {
     if (_updatingFromModel) return;
+
     if (_codeController.text != widget.model.text) {
       _updatingFromModel = true;
       widget.model.lines = _codeController.text.split('\n');
       widget.model.dirty = true;
       _updatingFromModel = false;
     }
+
+    if (_codeController.selection.isValid) {
+      final extentOffset = _codeController.selection.extentOffset;
+      final (r, c) = offsetToRowCol(widget.model.lines, extentOffset);
+      if (r != widget.model.row || c != widget.model.col) {
+        _updatingFromModel = true;
+        widget.model.moveTo(r, c);
+        _updatingFromModel = false;
+      }
+    }
   }
 
   void _onModelChanged() {
     if (_updatingFromModel) return;
+
+    _updatingFromModel = true;
     if (_codeController.text != widget.model.text) {
-      _updatingFromModel = true;
       _codeController.text = widget.model.text;
-      _updatingFromModel = false;
     }
+
+    final modelOffset = rowColToOffset(widget.model.lines, widget.model.row, widget.model.col);
+    if (_codeController.selection.extentOffset != modelOffset) {
+      _codeController.selection = TextSelection.collapsed(offset: modelOffset);
+    }
+    _updatingFromModel = false;
   }
 
   @override
@@ -207,9 +227,124 @@ class _CodeViewState extends State<CodeView> {
                     widget.model.applySuggestion(s);
                   },
                 ),
+              )
+            else if (widget.model.signatureHelp != null)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: _SignatureHelpOverlay(
+                  help: widget.model.signatureHelp!,
+                ),
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SignatureHelpOverlay extends StatelessWidget {
+  const _SignatureHelpOverlay({
+    required this.help,
+  });
+
+  final LspSignatureHelp help;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    if (help.signatures.isEmpty) return const SizedBox.shrink();
+
+    final sig = help.signatures[help.activeSignature.clamp(0, help.signatures.length - 1)];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: c.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Signature',
+                style: LatticeText.ui(10, weight: FontWeight.w600, color: c.accent),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          _buildSignatureText(sig, help.activeParameter, c),
+          if (sig.documentation != null && sig.documentation!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              sig.documentation!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: LatticeText.ui(11, color: c.textMuted),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSignatureText(LspSignatureInfo sig, int activeParamIndex, LatticeColors c) {
+    if (sig.parameters.isEmpty) {
+      return Text(
+        sig.label,
+        style: LatticeText.mono(12, color: c.text),
+      );
+    }
+
+    final spans = <InlineSpan>[];
+    final activeIndex = activeParamIndex.clamp(0, sig.parameters.length - 1);
+
+    for (var i = 0; i < sig.parameters.length; i++) {
+      final param = sig.parameters[i];
+      final isCurrent = i == activeIndex;
+
+      if (i > 0) {
+        spans.add(TextSpan(
+          text: ', ',
+          style: LatticeText.mono(12, color: c.textMuted),
+        ));
+      }
+
+      spans.add(TextSpan(
+        text: param.label,
+        style: LatticeText.mono(
+          12,
+          color: isCurrent ? c.accent : c.text,
+          weight: isCurrent ? FontWeight.bold : FontWeight.normal,
+        ),
+      ));
+    }
+
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '${sig.label.split('(').first}(',
+            style: LatticeText.mono(12, color: c.text),
+          ),
+          ...spans,
+          TextSpan(
+            text: ')',
+            style: LatticeText.mono(12, color: c.text),
+          ),
+        ],
       ),
     );
   }

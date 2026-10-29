@@ -4,6 +4,7 @@ import 'package:lattice/models/document.dart';
 import 'package:lattice/models/editor_model.dart';
 import 'package:lattice/models/folding_model.dart';
 import 'package:lattice/models/search_model.dart';
+import 'package:lattice/widgets/code_view.dart' show rowColToOffset, offsetToRowCol;
 import 'package:lattice/widgets/editor_input_client.dart';
 
 void main() {
@@ -105,6 +106,17 @@ void main() {
 
       model.undo();
       expect(model.text, equals('hello'));
+    });
+
+    test('rowColToOffset and offsetToRowCol accurately map line and column', () {
+      final lines = ['line one', 'line two', 'line three'];
+      expect(rowColToOffset(lines, 0, 4), equals(4));
+      expect(rowColToOffset(lines, 1, 0), equals(9));
+      expect(rowColToOffset(lines, 1, 4), equals(13));
+
+      expect(offsetToRowCol(lines, 4), equals((0, 4)));
+      expect(offsetToRowCol(lines, 9), equals((1, 0)));
+      expect(offsetToRowCol(lines, 13), equals((1, 4)));
     });
   });
 }

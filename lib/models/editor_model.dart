@@ -193,9 +193,21 @@ class EditorModel extends ChangeNotifier {
     return RegExp(r'[A-Za-z_$][\w$]*$').stringMatch(before) ?? '';
   }
 
+  LspSignatureHelp? get signatureHelp {
+    return lspService.getSignatureHelp(fileName, text, row, col);
+  }
+
   List<Suggestion> get suggestions {
     final p = prefix;
-    if (p.length < 2) return const [];
+    final cur = currentLine;
+    final safeCol = col.clamp(0, cur.length);
+    final before = cur.substring(0, safeCol);
+
+    final isMemberAccess = RegExp(r'[A-Za-z_$][\w$]*\.\s*[A-Za-z_$][\w$]*$').hasMatch(before) ||
+        RegExp(r'[A-Za-z_$][\w$]*\.\s*$').hasMatch(before);
+
+    if (!isMemberAccess && p.length < 2) return const [];
+
     final completions = lspService.getCompletions(fileName, text, row, col, p);
     final results = completions
         .map((c) => Suggestion(
@@ -206,11 +218,14 @@ class EditorModel extends ChangeNotifier {
             ))
         .toList();
 
-    for (final s in kAllSuggestions) {
-      if (s.label.startsWith(p) && s.label != p && !results.any((r) => r.label == s.label)) {
-        results.add(s);
+    if (!isMemberAccess) {
+      for (final s in kAllSuggestions) {
+        if (s.label.startsWith(p) && s.label != p && !results.any((r) => r.label == s.label)) {
+          results.add(s);
+        }
       }
     }
+
     return results;
   }
 
