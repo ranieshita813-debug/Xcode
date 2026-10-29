@@ -3,6 +3,7 @@ import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
 import '../state/settings.dart';
 import '../theme/tokens.dart';
 import '../theme/typography.dart';
+import '../widgets/clone_dialog.dart';
 import '../widgets/common.dart';
 import 'editor_screen.dart';
 
@@ -238,7 +239,9 @@ class _ProjectTab extends StatelessWidget {
                     label: 'Clone',
                     icon: iconoir.GitBranch(
                         color: c.text, width: 18, height: 18),
-                    onTap: () {},
+                    onTap: () async {
+                      await CloneDialog.show(context);
+                    },
                   ),
                 ),
               ],

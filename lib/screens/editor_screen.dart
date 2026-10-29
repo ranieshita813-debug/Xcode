@@ -12,7 +12,6 @@ import '../widgets/code_view.dart';
 import '../widgets/command_palette.dart';
 import '../widgets/common.dart';
 import '../widgets/files_drawer.dart';
-import '../widgets/keyboard.dart';
 import '../widgets/terminal_panel.dart';
 import 'settings_screen.dart';
 import 'source_control_screen.dart';
@@ -120,25 +119,6 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   // ---- input routing -----------------------------------------------------
-
-  void _onKey(String k) {
-    final m = _model;
-    if (m == null) return;
-    switch (k) {
-      case Keys.backspace:
-        m.backspace();
-      case Keys.enter:
-        m.newline();
-      case Keys.left:
-        m.moveHorizontal(-1);
-      case Keys.right:
-        m.moveHorizontal(1);
-      case Keys.tab:
-        m.insert('  ');
-      default:
-        m.insert(k);
-    }
-  }
 
   void _openPalette() => setState(() {
         _paletteQuery = '';
@@ -344,7 +324,6 @@ class _EditorScreenState extends State<EditorScreen> {
                         result: _build,
                         onClose: () => setState(() => _terminal = false),
                       ),
-                    SafeArea(top: false, child: ExtraKeys(onKey: _onKey)),
                   ],
                 ),
                 // Left-edge swipe opens the drawer.
