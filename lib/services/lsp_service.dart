@@ -60,7 +60,101 @@ class LspHover {
   final int col;
 }
 
+class LspParameterInfo {
+  const LspParameterInfo({
+    required this.label,
+    this.documentation,
+  });
+
+  final String label;
+  final String? documentation;
+}
+
+class LspSignatureInfo {
+  const LspSignatureInfo({
+    required this.label,
+    this.documentation,
+    required this.parameters,
+  });
+
+  final String label;
+  final String? documentation;
+  final List<LspParameterInfo> parameters;
+}
+
+class LspSignatureHelp {
+  const LspSignatureHelp({
+    required this.signatures,
+    required this.activeSignature,
+    required this.activeParameter,
+  });
+
+  final List<LspSignatureInfo> signatures;
+  final int activeSignature;
+  final int activeParameter;
+}
+
 class LspService {
+  static const Map<String, List<LspCompletion>> _objectMembers = {
+    'react': [
+      LspCompletion(label: 'useState', kind: 'function', detail: '(initialState) => [state, setState]', documentation: 'React Hook that lets you add state variable to your component.'),
+      LspCompletion(label: 'useEffect', kind: 'function', detail: '(effect, deps) => void', documentation: 'React Hook that lets you synchronize a component with an external system.'),
+      LspCompletion(label: 'useContext', kind: 'function', detail: '(context) => value', documentation: 'React Hook that lets you read and subscribe to context from your component.'),
+      LspCompletion(label: 'useReducer', kind: 'function', detail: '(reducer, initialArg) => [state, dispatch]', documentation: 'React Hook that lets you add a reducer to your component.'),
+      LspCompletion(label: 'useCallback', kind: 'function', detail: '(fn, deps) => callback', documentation: 'React Hook that lets you cache a function definition between re-renders.'),
+      LspCompletion(label: 'useMemo', kind: 'function', detail: '(factory, deps) => value', documentation: 'React Hook that lets you cache the result of a calculation between re-renders.'),
+      LspCompletion(label: 'useRef', kind: 'function', detail: '(initialValue) => refContainer', documentation: 'React Hook that lets you reference a value that’s not needed for rendering.'),
+      LspCompletion(label: 'FC', kind: 'type', detail: 'type React.FC<P>', documentation: 'React Functional Component type.'),
+      LspCompletion(label: 'Component', kind: 'class', detail: 'class React.Component<P, S>', documentation: 'Base class for React components.'),
+      LspCompletion(label: 'createContext', kind: 'function', detail: '(defaultValue) => Context', documentation: 'Creates a Context object.'),
+      LspCompletion(label: 'createElement', kind: 'function', detail: '(type, props, ...children)', documentation: 'Creates a React element.'),
+      LspCompletion(label: 'memo', kind: 'function', detail: '(Component) => MemoizedComponent', documentation: 'Skips re-rendering component when props are unchanged.'),
+      LspCompletion(label: 'forwardRef', kind: 'function', detail: '(render) => Component', documentation: 'Exposes a DOM node to a parent component with a ref.'),
+      LspCompletion(label: 'lazy', kind: 'function', detail: '(load) => LazyComponent', documentation: 'Lets you defer loading component code until it is rendered.'),
+      LspCompletion(label: 'Suspense', kind: 'class', detail: 'class Suspense', documentation: 'Displays a fallback until its children finish loading.'),
+      LspCompletion(label: 'Fragment', kind: 'class', detail: 'class Fragment', documentation: 'Groups elements without extra DOM node.'),
+      LspCompletion(label: 'StrictMode', kind: 'class', detail: 'class StrictMode', documentation: 'Checks for potential problems in an application during development.'),
+    ],
+    'console': [
+      LspCompletion(label: 'log', kind: 'function', detail: '(message?: any, ...optionalParams: any[]) => void', documentation: 'Outputs a message to the web console.'),
+      LspCompletion(label: 'error', kind: 'function', detail: '(message?: any, ...optionalParams: any[]) => void', documentation: 'Outputs an error message.'),
+      LspCompletion(label: 'warn', kind: 'function', detail: '(message?: any, ...optionalParams: any[]) => void', documentation: 'Outputs a warning message.'),
+      LspCompletion(label: 'info', kind: 'function', detail: '(message?: any, ...optionalParams: any[]) => void', documentation: 'Outputs an informational message.'),
+      LspCompletion(label: 'debug', kind: 'function', detail: '(message?: any, ...optionalParams: any[]) => void', documentation: 'Outputs a debug message.'),
+      LspCompletion(label: 'clear', kind: 'function', detail: '() => void', documentation: 'Clears the console.'),
+      LspCompletion(label: 'time', kind: 'function', detail: '(label?: string) => void', documentation: 'Starts a timer.'),
+      LspCompletion(label: 'timeEnd', kind: 'function', detail: '(label?: string) => void', documentation: 'Stops a timer.'),
+      LspCompletion(label: 'table', kind: 'function', detail: '(tabularData?: any) => void', documentation: 'Displays tabular data as a table.'),
+    ],
+    'math': [
+      LspCompletion(label: 'abs', kind: 'function', detail: '(x: number) => number'),
+      LspCompletion(label: 'ceil', kind: 'function', detail: '(x: number) => number'),
+      LspCompletion(label: 'floor', kind: 'function', detail: '(x: number) => number'),
+      LspCompletion(label: 'max', kind: 'function', detail: '(...values: number[]) => number'),
+      LspCompletion(label: 'min', kind: 'function', detail: '(...values: number[]) => number'),
+      LspCompletion(label: 'pow', kind: 'function', detail: '(x: number, y: number) => number'),
+      LspCompletion(label: 'random', kind: 'function', detail: '() => number'),
+      LspCompletion(label: 'round', kind: 'function', detail: '(x: number) => number'),
+      LspCompletion(label: 'sqrt', kind: 'function', detail: '(x: number) => number'),
+      LspCompletion(label: 'PI', kind: 'constant', detail: 'number = 3.141592653589793'),
+    ],
+    'json': [
+      LspCompletion(label: 'parse', kind: 'function', detail: '(text: string) => any', documentation: 'Parses JSON text into value.'),
+      LspCompletion(label: 'stringify', kind: 'function', detail: '(value: any) => string', documentation: 'Converts value to JSON string.'),
+    ],
+    'array': [
+      LspCompletion(label: 'from', kind: 'function', detail: '(arrayLike) => Array'),
+      LspCompletion(label: 'isArray', kind: 'function', detail: '(arg: any) => boolean'),
+      LspCompletion(label: 'of', kind: 'function', detail: '(...items) => Array'),
+    ],
+    'document': [
+      LspCompletion(label: 'getElementById', kind: 'function', detail: '(elementId: string) => Element | null'),
+      LspCompletion(label: 'querySelector', kind: 'function', detail: '(selectors: string) => Element | null'),
+      LspCompletion(label: 'querySelectorAll', kind: 'function', detail: '(selectors: string) => NodeList'),
+      LspCompletion(label: 'createElement', kind: 'function', detail: '(tagName: string) => HTMLElement'),
+      LspCompletion(label: 'addEventListener', kind: 'function', detail: '(type: string, listener: Function) => void'),
+    ],
+  };
   static const Map<String, List<LspCompletion>> _langKeywords = {
     'php': [
       LspCompletion(label: 'array_filter', kind: 'function', detail: r'array_filter(array $array, ?callable $callback)', documentation: 'Filters elements of an array using a callback function.'),
@@ -529,6 +623,39 @@ class LspService {
     int col,
     String prefix,
   ) {
+    final lines = content.split('\n');
+    final line = (row >= 0 && row < lines.length) ? lines[row] : '';
+    final safeCol = col.clamp(0, line.length);
+    final beforeCol = line.substring(0, safeCol);
+
+    // Check member access (e.g., react. or React.use or console.log)
+    final memberMatch = RegExp(r'([A-Za-z_$][\w$]*)\.\s*([A-Za-z_$][\w$]*)?$').firstMatch(beforeCol);
+    if (memberMatch != null) {
+      final target = memberMatch.group(1)!;
+      final mPrefix = memberMatch.group(2) ?? '';
+
+      final members = _objectMembers[target] ?? _objectMembers[target.toLowerCase()];
+      if (members != null) {
+        return members.where((m) {
+          if (mPrefix.isEmpty) return true;
+          return m.label.toLowerCase().startsWith(mPrefix.toLowerCase());
+        }).toList();
+      }
+
+      // Generic target fallback members from document symbols or standard list
+      final lang = detectLanguage(fileName);
+      final predefined = _langKeywords[lang] ?? _langKeywords['typescript']!;
+      final genericMembers = <LspCompletion>[];
+      for (final c in predefined) {
+        if (c.kind == 'function' || c.kind == 'property' || c.kind == 'variable') {
+          if (mPrefix.isEmpty || c.label.toLowerCase().startsWith(mPrefix.toLowerCase())) {
+            genericMembers.add(c);
+          }
+        }
+      }
+      return genericMembers;
+    }
+
     if (prefix.isEmpty) return const [];
     final lang = detectLanguage(fileName);
     final results = <LspCompletion>[];
@@ -657,5 +784,123 @@ class LspService {
     }
 
     return null;
+  }
+
+  /// Analyzes code context around row & col and returns signature help for function calls if active.
+  LspSignatureHelp? getSignatureHelp(
+    String fileName,
+    String content,
+    int row,
+    int col,
+  ) {
+    final lines = content.split('\n');
+    if (row < 0 || row >= lines.length) return null;
+
+    final buffer = StringBuffer();
+    for (var i = 0; i <= row; i++) {
+      final l = lines[i];
+      if (i < row) {
+        buffer.writeln(l);
+      } else {
+        buffer.write(l.substring(0, col.clamp(0, l.length)));
+      }
+    }
+    final textUpToCursor = buffer.toString();
+
+    var depth = 0;
+    var commaCount = 0;
+    var openParenIndex = -1;
+
+    for (var i = textUpToCursor.length - 1; i >= 0; i--) {
+      final ch = textUpToCursor[i];
+      if (ch == ')') {
+        depth++;
+      } else if (ch == '(') {
+        if (depth > 0) {
+          depth--;
+        } else {
+          openParenIndex = i;
+          break;
+        }
+      } else if (ch == ',' && depth == 0) {
+        commaCount++;
+      }
+    }
+
+    if (openParenIndex < 0) return null;
+
+    final textBeforeParen = textUpToCursor.substring(0, openParenIndex).trimRight();
+    final fnMatch = RegExp(r'([A-Za-z_$][\w$.]*)$').firstMatch(textBeforeParen);
+    if (fnMatch == null) return null;
+
+    final rawFnName = fnMatch.group(1)!;
+    final fnName = rawFnName.contains('.') ? rawFnName.split('.').last : rawFnName;
+
+    String? detail;
+    String? documentation;
+
+    for (final members in _objectMembers.values) {
+      for (final item in members) {
+        if (item.label == fnName) {
+          detail = item.detail;
+          documentation = item.documentation;
+          break;
+        }
+      }
+      if (detail != null) break;
+    }
+
+    if (detail == null) {
+      final lang = detectLanguage(fileName);
+      final predefined = _langKeywords[lang] ?? _langKeywords['typescript']!;
+      for (final item in predefined) {
+        if (item.label == fnName || item.label == rawFnName) {
+          detail = item.detail;
+          documentation = item.documentation;
+          break;
+        }
+      }
+    }
+
+    if (detail == null) {
+      final docFnMatch = RegExp('\\b(?:def|function|fun|func|fn)\\s+${RegExp.escape(fnName)}\\s*\\(([^)]*)\\)')
+          .firstMatch(content);
+      if (docFnMatch != null) {
+        final paramsStr = docFnMatch.group(1) ?? '';
+        detail = '$fnName($paramsStr)';
+      }
+    }
+
+    detail ??= '$fnName(...)';
+
+    final params = <LspParameterInfo>[];
+    final paramMatch = RegExp(r'\(([^)]*)\)').firstMatch(detail);
+    if (paramMatch != null) {
+      final rawParams = paramMatch.group(1)!;
+      if (rawParams.trim().isNotEmpty) {
+        for (final p in rawParams.split(',')) {
+          final trimmed = p.trim();
+          if (trimmed.isNotEmpty) {
+            params.add(LspParameterInfo(label: trimmed));
+          }
+        }
+      }
+    }
+
+    final sigLabel = detail.startsWith('(') ? '$rawFnName$detail' : detail;
+
+    final sigInfo = LspSignatureInfo(
+      label: sigLabel,
+      documentation: documentation,
+      parameters: params,
+    );
+
+    final activeParam = params.isEmpty ? 0 : commaCount.clamp(0, params.length - 1);
+
+    return LspSignatureHelp(
+      signatures: [sigInfo],
+      activeSignature: 0,
+      activeParameter: activeParam,
+    );
   }
 }
