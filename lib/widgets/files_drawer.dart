@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:iconoir_flutter/iconoir_flutter.dart' as iconoir;
@@ -290,6 +291,23 @@ class _FilesDrawerState extends State<FilesDrawer> {
       }
     }
 
+    void openInIntelliJ() async {
+      try {
+        await Process.run('idea', ['/app']);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Opening IntelliJ IDEA...')),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not launch IntelliJ IDEA: $e')),
+          );
+        }
+      }
+    }
+
     return Container(
       width: width,
       decoration: BoxDecoration(
@@ -338,6 +356,15 @@ class _FilesDrawerState extends State<FilesDrawer> {
                     ),
                   ),
                   Tooltip(
+                    message: 'Open in IntelliJ IDEA',
+                    child: LIconButton(
+                        icon: iconoir.Code(
+                            color: c.text, width: 18, height: 18),
+                        size: 36,
+                        onTap: openInIntelliJ),
+                  ),
+                  const SizedBox(width: 6),
+                  Tooltip(
                     message: 'New file',
                     child: LIconButton(
                         icon: iconoir.PagePlus(
@@ -345,7 +372,7 @@ class _FilesDrawerState extends State<FilesDrawer> {
                         size: 36,
                         onTap: () => _startCreate(folder: false)),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 6),
                   Tooltip(
                     message: 'New folder',
                     child: LIconButton(
