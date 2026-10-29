@@ -3,9 +3,11 @@ import 'package:lattice/models/document.dart';
 import 'package:lattice/services/lsp_service.dart';
 
 class Suggestion {
-  const Suggestion(this.label, this.kind);
+  const Suggestion(this.label, this.kind, {this.detail, this.documentation});
   final String label;
   final String kind;
+  final String? detail;
+  final String? documentation;
 }
 
 const kAllSuggestions = <Suggestion>[
@@ -195,7 +197,14 @@ class EditorModel extends ChangeNotifier {
     final p = prefix;
     if (p.length < 2) return const [];
     final completions = lspService.getCompletions(fileName, text, row, col, p);
-    final results = completions.map((c) => Suggestion(c.label, c.kind)).toList();
+    final results = completions
+        .map((c) => Suggestion(
+              c.label,
+              c.kind,
+              detail: c.detail,
+              documentation: c.documentation,
+            ))
+        .toList();
 
     for (final s in kAllSuggestions) {
       if (s.label.startsWith(p) && s.label != p && !results.any((r) => r.label == s.label)) {
