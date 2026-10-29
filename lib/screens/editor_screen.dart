@@ -15,6 +15,7 @@ import '../widgets/files_drawer.dart';
 import '../widgets/terminal_panel.dart';
 import 'settings_screen.dart';
 import 'source_control_screen.dart';
+import 'terminal_screen.dart';
 
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
@@ -39,7 +40,6 @@ class _EditorScreenState extends State<EditorScreen> {
   String _active = 'editor.tsx';
 
   bool _drawer = false;
-  bool _terminal = false;
   bool _autoSave = false;
   String? _paletteQuery; // non-null => palette open
   int _paletteSel = 0;
@@ -167,13 +167,17 @@ class _EditorScreenState extends State<EditorScreen> {
 
     setState(() {
       _build = BuildResult(errors: errors);
-      _terminal = true;
     });
     await _saveFile(_active);
     if (_autoSave) {
       for (final name in _models.keys.toList()) {
         if (_models[name]!.dirty) await _saveFile(name);
       }
+    }
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => TerminalScreen(result: _build)),
+      );
     }
   }
 
@@ -249,7 +253,9 @@ class _EditorScreenState extends State<EditorScreen> {
       LogicalKeyboardKey.keyS: () => _saveFile(_active, toast: true),
       LogicalKeyboardKey.keyP: _openPalette,
       LogicalKeyboardKey.keyB: () => setState(() => _drawer = !_drawer),
-      LogicalKeyboardKey.backquote: () => setState(() => _terminal = !_terminal),
+      LogicalKeyboardKey.backquote: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => TerminalScreen(result: _build)),
+      ),
       LogicalKeyboardKey.keyZ: () => _model?.undo(),
       LogicalKeyboardKey.keyY: () => _model?.redo(),
     };
@@ -273,7 +279,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final m = _model;
 
     return PopScope(
-      canPop: !(_drawer || paletteOpen || _terminal),
+      canPop: !(_drawer || paletteOpen),
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         setState(() {
@@ -281,8 +287,6 @@ class _EditorScreenState extends State<EditorScreen> {
             _paletteQuery = null;
           } else if (_drawer) {
             _drawer = false;
-          } else {
-            _terminal = false;
           }
         });
       },
@@ -304,7 +308,6 @@ class _EditorScreenState extends State<EditorScreen> {
                       onUndo: () => m?.undo(),
                       onRedo: () => m?.redo(),
                       onRun: _run,
-                      onSave: () => _saveFile(_active, toast: true),
                     ),
                     _Tabs(
                       tabs: _openTabs,
@@ -319,11 +322,6 @@ class _EditorScreenState extends State<EditorScreen> {
                           ? _EmptyState(onOpen: () => setState(() => _drawer = true))
                           : CodeView(key: ValueKey(_active), model: m),
                     ),
-                    if (_terminal)
-                      TerminalPanel(
-                        result: _build,
-                        onClose: () => setState(() => _terminal = false),
-                      ),
                   ],
                 ),
                 // Left-edge swipe opens the drawer.
@@ -406,11 +404,10 @@ class _AppBar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onRun,
-    required this.onSave,
   });
 
   final String title;
-  final VoidCallback onMenu, onTitle, onUndo, onRedo, onRun, onSave;
+  final VoidCallback onMenu, onTitle, onUndo, onRedo, onRun;
 
   @override
   Widget build(BuildContext context) {
@@ -449,8 +446,6 @@ class _AppBar extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 4),
-            tip('Save', LIconButton(icon: iconoir.FloppyDisk(color: c.text, width: 18, height: 18), onTap: onSave)),
             const SizedBox(width: 4),
             tip('Undo', LIconButton(icon: iconoir.Undo(color: c.text, width: 18, height: 18), onTap: onUndo)),
             const SizedBox(width: 4),
@@ -563,12 +558,11 @@ class _TabItem extends StatelessWidget {
         child: Container(
           constraints: const BoxConstraints(minWidth: 96, maxWidth: 200),
           decoration: BoxDecoration(
-            color: active ? c.bg : Colors.transparent,
+            color: Colors.transparent,
             border: Border(right: BorderSide(color: c.border)),
           ),
           child: Column(
             children: [
-              Container(height: 2, color: active ? c.accent : Colors.transparent),
               SizedBox(
                 height: 39,
                 child: Padding(
@@ -581,8 +575,12 @@ class _TabItem extends StatelessWidget {
                           name,
                           overflow: TextOverflow.ellipsis,
                           style: LatticeText.ui(13,
-                              weight: active ? FontWeight.w500 : FontWeight.w400,
-                              color: active ? c.text : c.textMuted),
+                                  weight: active ? FontWeight.w500 : FontWeight.w400,
+                                  color: active ? c.text : c.textMuted)
+                              .copyWith(
+                            decoration: active ? TextDecoration.underline : TextDecoration.none,
+                            decorationColor: c.accent,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -616,6 +614,7 @@ class _TabItem extends StatelessWidget {
                   ),
                 ),
               ),
+              Container(height: 2, color: active ? c.accent : Colors.transparent),
             ],
           ),
         ),

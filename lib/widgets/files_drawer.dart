@@ -46,78 +46,7 @@ List<String> _ancestorsOf(String path) {
   return [for (var i = segs.length - 1; i > 0; i--) segs.sublist(0, i).join('/')];
 }
 
-// ───────────────────────── Icon theme ─────────────────────────
 
-class _Glyph {
-  const _Glyph(this.label, this.color);
-  final String label;
-  final Color color;
-}
-
-_Glyph? _glyphFor(String name) {
-  final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
-  switch (ext) {
-    case 'ts':
-      return const _Glyph('TS', Color(0xFF3B82F6));
-    case 'tsx':
-      return const _Glyph('TSX', Color(0xFF38BDF8));
-    case 'dart':
-      return const _Glyph('D', Color(0xFF22B8CF));
-    case 'py':
-      return const _Glyph('PY', Color(0xFFEAB308));
-    case 'cpp':
-      return const _Glyph('C++', Color(0xFF8B5CF6));
-    case 'kt':
-      return const _Glyph('KT', Color(0xFFF97316));
-    case 'json':
-      return const _Glyph('{}', Color(0xFFF59E0B));
-    case 'md':
-      return const _Glyph('MD', Color(0xFF94A3B8));
-    default:
-      return null;
-  }
-}
-
-Color? _folderTint(String name) {
-  switch (name) {
-    case 'src':
-      return const Color(0xFF3B82F6);
-    case 'components':
-      return const Color(0xFF8B5CF6);
-    case 'assets':
-      return const Color(0xFFF59E0B);
-    default:
-      return null;
-  }
-}
-
-class _FileGlyph extends StatelessWidget {
-  const _FileGlyph(this.name);
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final g = _glyphFor(name);
-    if (g == null) {
-      return iconoir.Page(color: c.textMuted, width: 16, height: 16);
-    }
-    return Container(
-      width: 22,
-      height: 16,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: g.color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        g.label,
-        style: LatticeText.ui(g.label.length > 2 ? 8 : 9,
-            weight: FontWeight.w700, color: g.color),
-      ),
-    );
-  }
-}
 
 // ───────────────────────── Drawer ─────────────────────────
 
@@ -666,9 +595,6 @@ class _NewEntryRowState extends State<_NewEntryRow> {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final text = _ctl.text.trim();
-    final isFolder = widget.folder || text.endsWith('/');
-    final leaf = text.replaceAll(RegExp(r'/+$'), '').split('/').last;
     final left = _TreeRow._base + widget.depth * _TreeRow._indent;
 
     return Column(
@@ -681,11 +607,6 @@ class _NewEntryRowState extends State<_NewEntryRow> {
             child: Row(
               children: [
                 const SizedBox(width: 20),
-                if (isFolder)
-                  Icon(Icons.folder_rounded, size: 18, color: c.textMuted)
-                else
-                  _FileGlyph(leaf),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Container(
                     height: 26,
@@ -863,25 +784,35 @@ class _OpenEditorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     return Material(
-      color: active ? c.accentSoft : Colors.transparent,
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        child: SizedBox(
+        child: Container(
           height: 34,
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: active ? c.accent : Colors.transparent,
+                width: active ? 2 : 0,
+              ),
+            ),
+          ),
           child: Padding(
             padding: const EdgeInsets.only(left: 12, right: 12),
             child: Row(
               children: [
                 Icon(Icons.close, size: 14, color: c.textFaint),
                 const SizedBox(width: 8),
-                _FileGlyph(name),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Text(name,
                       overflow: TextOverflow.ellipsis,
                       style: LatticeText.ui(13.5,
-                          weight: active ? FontWeight.w600 : FontWeight.w400,
-                          color: _statusColor(c, status))),
+                              weight: active ? FontWeight.w600 : FontWeight.w400,
+                              color: _statusColor(c, status))
+                          .copyWith(
+                        decoration: active ? TextDecoration.underline : TextDecoration.none,
+                        decorationColor: c.accent,
+                      )),
                 ),
                 if (status != null)
                   Container(
@@ -926,6 +857,9 @@ class _TreeRow extends StatelessWidget {
       13.5,
       weight: active ? FontWeight.w600 : FontWeight.w400,
       color: _statusColor(c, node.status),
+    ).copyWith(
+      decoration: active ? TextDecoration.underline : TextDecoration.none,
+      decorationColor: c.accent,
     );
     final name = node.name;
     final i = query.isEmpty ? -1 : name.toLowerCase().indexOf(query);
@@ -952,7 +886,6 @@ class _TreeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final folderTint = _folderTint(node.name) ?? c.textMuted;
 
     return Semantics(
       button: true,
@@ -960,13 +893,19 @@ class _TreeRow extends StatelessWidget {
       expanded: node.folder ? expanded : null,
       label: node.name,
       child: Material(
-        color: active
-            ? c.accentSoft
-            : (selected ? c.raised : Colors.transparent),
+        color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          child: SizedBox(
+          child: Container(
             height: 34,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: active ? c.accent : Colors.transparent,
+                  width: active ? 2 : 0,
+                ),
+              ),
+            ),
             child: Stack(
               children: [
                 for (var d = 0; d < node.depth; d++)
@@ -999,17 +938,6 @@ class _TreeRow extends StatelessWidget {
                             : null,
                       ),
                       const SizedBox(width: 4),
-                      if (node.folder)
-                        Icon(
-                          expanded
-                              ? Icons.folder_open_rounded
-                              : Icons.folder_rounded,
-                          size: 18,
-                          color: folderTint,
-                        )
-                      else
-                        _FileGlyph(node.name),
-                      const SizedBox(width: 8),
                       Expanded(child: _label(c)),
                       if (node.status != null)
                         Text(

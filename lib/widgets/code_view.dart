@@ -161,7 +161,11 @@ class _CodeViewState extends State<CodeView> {
     final c = context.c;
     final s = SettingsScope.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final themeStyles = isDark ? atomOneDarkTheme : atomOneLightTheme;
+    final baseStyles = isDark ? atomOneDarkTheme : atomOneLightTheme;
+    final themeStyles = Map<String, TextStyle>.from(baseStyles);
+    themeStyles['root'] = (themeStyles['root'] ?? const TextStyle()).copyWith(
+      backgroundColor: c.bg,
+    );
 
     final textStyle = LatticeText.mono(
       s.fontSize,
@@ -173,21 +177,224 @@ class _CodeViewState extends State<CodeView> {
       data: CodeThemeData(styles: themeStyles),
       child: Container(
         color: c.bg,
-        child: SingleChildScrollView(
-          child: CodeField(
-            controller: _codeController,
-            textStyle: textStyle,
-            gutterStyle: GutterStyle(
-              showLineNumbers: s.lineNumbers,
-              textStyle: LatticeText.mono(
-                s.fontSize,
-                fontFamily: s.fontFamily,
-                color: c.textFaint,
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              child: CodeField(
+                controller: _codeController,
+                textStyle: textStyle,
+                background: c.bg,
+                gutterStyle: GutterStyle(
+                  showLineNumbers: s.lineNumbers,
+                  textStyle: LatticeText.mono(
+                    s.fontSize,
+                    fontFamily: s.fontFamily,
+                    color: c.textFaint,
+                  ),
+                  width: s.lineNumbers ? 42 : 12,
+                  margin: 8,
+                ),
               ),
-              width: s.lineNumbers ? 42 : 12,
-              margin: 8,
+            ),
+            if (widget.model.suggestions.isNotEmpty)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: _AutocompleteOverlay(
+                  model: widget.model,
+                  onSelect: (s) {
+                    widget.model.applySuggestion(s);
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AutocompleteOverlay extends StatefulWidget {
+  const _AutocompleteOverlay({
+    required this.model,
+    required this.onSelect,
+  });
+
+  final EditorModel model;
+  final ValueChanged<Suggestion> onSelect;
+
+  @override
+  State<_AutocompleteOverlay> createState() => _AutocompleteOverlayState();
+}
+
+class _AutocompleteOverlayState extends State<_AutocompleteOverlay> {
+  int _selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final suggestions = widget.model.suggestions;
+    if (suggestions.isEmpty) return const SizedBox.shrink();
+
+    final safeIndex = _selectedIndex.clamp(0, suggestions.length - 1);
+    final selectedItem = suggestions[safeIndex];
+
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 220),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: c.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: c.raised,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+              border: Border(bottom: BorderSide(color: c.border)),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  'IntelliSense',
+                  style: LatticeText.ui(10, weight: FontWeight.w600, color: c.accent),
+                ),
+                const Spacer(),
+                Text(
+                  '${safeIndex + 1}/${suggestions.length}',
+                  style: LatticeText.ui(10, color: c.textFaint),
+                ),
+              ],
             ),
           ),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              itemCount: suggestions.length,
+              separatorBuilder: (_, __) => Divider(height: 1, color: c.border),
+              itemBuilder: (context, index) {
+                final s = suggestions[index];
+                final isSelected = index == safeIndex;
+                return InkWell(
+                  onTap: () {
+                    setState(() => _selectedIndex = index);
+                    widget.onSelect(s);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    color: isSelected ? c.accentSoft : Colors.transparent,
+                    child: Row(
+                      children: [
+                        _KindBadge(kind: s.kind),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text.rich(
+                            _highlightMatch(s.label, widget.model.prefix, c),
+                            overflow: TextOverflow.ellipsis,
+                            style: LatticeText.mono(12, color: c.text),
+                          ),
+                        ),
+                        if (s.detail != null) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              s.detail!,
+                              overflow: TextOverflow.ellipsis,
+                              style: LatticeText.mono(11, color: c.textMuted),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (selectedItem.documentation != null && selectedItem.documentation!.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: c.raised,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(7)),
+                border: Border(top: BorderSide(color: c.border)),
+              ),
+              child: Text(
+                selectedItem.documentation!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: LatticeText.ui(11, color: c.textMuted),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  TextSpan _highlightMatch(String text, String prefix, LatticeColors c) {
+    if (prefix.isEmpty) return TextSpan(text: text);
+    final i = text.toLowerCase().indexOf(prefix.toLowerCase());
+    if (i < 0) return TextSpan(text: text);
+
+    return TextSpan(
+      children: [
+        if (i > 0) TextSpan(text: text.substring(0, i)),
+        TextSpan(
+          text: text.substring(i, i + prefix.length),
+          style: TextStyle(
+            color: c.accent,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        if (i + prefix.length < text.length)
+          TextSpan(text: text.substring(i + prefix.length)),
+      ],
+    );
+  }
+}
+
+class _KindBadge extends StatelessWidget {
+  const _KindBadge({required this.kind});
+  final String kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (kind.toLowerCase()) {
+      'function' => ('fn', const Color(0xFF3B82F6)),
+      'keyword' => ('kw', const Color(0xFFF97316)),
+      'class' || 'type' => ('cl', const Color(0xFF10B981)),
+      'variable' => ('var', const Color(0xFF8B5CF6)),
+      'property' => ('prop', const Color(0xFFEC4899)),
+      'tag' => ('tag', const Color(0xFF06B6D4)),
+      _ => ('sym', const Color(0xFF6B7280)),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          color: color,
         ),
       ),
     );
